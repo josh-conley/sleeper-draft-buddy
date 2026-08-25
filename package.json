@@ -1,0 +1,19 @@
+{
+  "name": "sleeper-draft-buddy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Chrome extension: paste a plain list of player names, get a live draft overlay on either Sleeper draft board.",
+  "scripts": {
+    "test": "node test/board.test.mjs && node test/ambiguity.test.mjs && node test/enrich.test.mjs && node test/render.test.mjs",
+    "test:live": "node test/live-enrich.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "build": "node tools/build.mjs",
+    "test:package": "npm run build && node test/package.test.mjs",
+    "build:store": "node tools/build.mjs --store",
+    "shot": "node tools/crop-shot.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}

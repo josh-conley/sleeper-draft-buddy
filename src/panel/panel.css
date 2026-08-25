@@ -1,0 +1,252 @@
+:host { all: initial; }
+
+*, *::before, *::after { box-sizing: border-box; }
+
+:host {
+  --bg: #14161c;
+  --bg-2: #1b1e26;
+  --bg-3: #232733;
+  --line: #2e3342;
+  --text: #e6e9f0;
+  --dim: #8b93a7;
+  --accent: #4fd1c5;
+
+  --steal: #17c964;
+  --value: #6fbf73;
+  --fair: #6b7280;
+  --reach: #e0a53a;
+  --big-reach: #ef4444;
+
+  --qb: #f4738e;
+  --rb: #45d4a8;
+  --wr: #5aa9f5;
+  --te: #f4a35a;
+  --k: #b98bf0;
+  --def: #9aa4b8;
+}
+
+.wrap {
+  position: fixed;
+  z-index: 2147483000;
+  display: flex;
+  flex-direction: column;
+  min-width: 420px;
+  min-height: 120px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+.wrap.collapsed { height: auto !important; min-height: 0; }
+.wrap.collapsed .toolbar,
+.wrap.collapsed .body,
+.wrap.collapsed .grip { display: none; }
+
+/* ---- header ---- */
+.header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  user-select: none;
+  flex: 0 0 auto;
+}
+.header.dragging { cursor: grabbing; }
+.title { font-weight: 700; letter-spacing: .3px; }
+/* The dot answers one question: how close are you to being on the clock?
+   green = you're up, yellow = 1-4 picks away, red = 5+, grey = can't tell. */
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fair); flex: 0 0 auto; }
+.dot[data-state="on-clock"] {
+  background: var(--steal);
+  box-shadow: 0 0 0 0 rgba(23, 201, 100, .7);
+  animation: srx-pulse 1.6s ease-out infinite;
+}
+.dot[data-state="soon"]    { background: var(--reach);     box-shadow: 0 0 6px rgba(224, 165, 58, .6); }
+.dot[data-state="far"]     { background: var(--big-reach); }
+.dot[data-state="unknown"] { background: var(--fair); opacity: .6; }
+
+@keyframes srx-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(23, 201, 100, .7); }
+  70%  { box-shadow: 0 0 0 7px rgba(23, 201, 100, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(23, 201, 100, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot[data-state="on-clock"] { animation: none; box-shadow: 0 0 8px var(--steal); }
+}
+.pickinfo { color: var(--dim); }
+.pickinfo b { color: var(--text); }
+.spacer { flex: 1 1 auto; }
+
+.chip-warn {
+  background: rgba(224, 165, 58, .15);
+  color: var(--reach);
+  border: 1px solid rgba(224, 165, 58, .4);
+  border-radius: 999px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.chip-warn[hidden] { display: none; }
+
+.iconbtn {
+  background: none; border: 1px solid transparent; color: var(--dim);
+  border-radius: 6px; cursor: pointer; padding: 3px 7px; font-size: 13px;
+}
+.iconbtn:hover { color: var(--text); background: var(--bg-3); }
+
+/* ---- toolbar ---- */
+.toolbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+  flex: 0 0 auto;
+}
+.filters { display: flex; gap: 4px; }
+.filter {
+  background: var(--bg-3); color: var(--dim);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 3px 9px; cursor: pointer; font-size: 11px; font-weight: 600;
+}
+.filter:hover { color: var(--text); }
+.filter[aria-pressed="true"] { background: var(--accent); color: #0b1114; border-color: var(--accent); }
+
+.search {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 4px 8px; width: 130px; font: inherit;
+}
+.search::placeholder { color: var(--dim); }
+.search:focus { outline: none; border-color: var(--accent); }
+
+.toggle { display: flex; align-items: center; gap: 5px; color: var(--dim); cursor: pointer; }
+.toggle input { accent-color: var(--accent); margin: 0; }
+.count { color: var(--dim); margin-left: auto; }
+
+/* ---- table ---- */
+.body { flex: 1 1 auto; overflow: auto; }
+table { border-collapse: collapse; width: 100%; }
+thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--bg-3);
+  color: var(--dim);
+  text-align: left;
+  font-size: 10px; text-transform: uppercase; letter-spacing: .6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer; white-space: nowrap; user-select: none;
+}
+thead th:hover { color: var(--text); }
+thead th[aria-sort]:not([aria-sort="none"]) { color: var(--accent); }
+th .arrow { opacity: .85; }
+td { padding: 4px 8px; border-bottom: 1px solid rgba(46, 51, 66, .5); white-space: nowrap; }
+tbody tr { cursor: pointer; }
+tbody tr:hover td { background: rgba(255, 255, 255, .04); }
+tbody tr.drafted td { opacity: .38; text-decoration: line-through; }
+tbody tr.manual td { opacity: .38; text-decoration: line-through dotted; }
+
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.name { font-weight: 600; }
+
+.rankbadge {
+  display: inline-block; min-width: 26px; text-align: center;
+  border-radius: 5px; padding: 1px 5px;
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  background: var(--bg-3); color: var(--text);
+}
+.rankbadge[data-band="steal"]     { background: rgba(23, 201, 100, .22); color: var(--steal); box-shadow: inset 0 0 0 1px rgba(23,201,100,.5); }
+.rankbadge[data-band="value"]     { background: rgba(111, 191, 115, .16); color: var(--value); }
+.rankbadge[data-band="fair"]      { background: var(--bg-3); color: var(--dim); }
+.rankbadge[data-band="reach"]     { background: rgba(224, 165, 58, .16); color: var(--reach); }
+.rankbadge[data-band="big-reach"] { background: rgba(239, 68, 68, .18); color: var(--big-reach); }
+
+.pos {
+  display: inline-block; border-radius: 4px; padding: 1px 5px;
+  font-size: 10px; font-weight: 700; letter-spacing: .4px;
+  background: var(--bg-3); color: var(--dim);
+}
+.pos[data-pos="QB"]  { background: rgba(244,115,142,.18); color: var(--qb); }
+.pos[data-pos="RB"]  { background: rgba(69,212,168,.18);  color: var(--rb); }
+.pos[data-pos="WR"]  { background: rgba(90,169,245,.18);  color: var(--wr); }
+.pos[data-pos="TE"]  { background: rgba(244,163,90,.18);  color: var(--te); }
+.pos[data-pos="K"]   { background: rgba(185,139,240,.18); color: var(--k); }
+.pos[data-pos="DEF"] { background: rgba(154,164,184,.18); color: var(--def); }
+
+.empty { padding: 26px 16px; text-align: center; color: var(--dim); line-height: 1.7; }
+
+/* ---- settings / paste view ---- */
+.settings { padding: 12px; overflow: auto; flex: 1 1 auto; }
+.settings h3 { margin: 0 0 4px; font-size: 13px; }
+.settings p { margin: 0 0 10px; color: var(--dim); }
+textarea {
+  width: 100%; height: 150px; resize: vertical;
+  background: var(--bg-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+textarea:focus { outline: none; border-color: var(--accent); }
+.btnrow { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+button.primary {
+  background: var(--accent); color: #0b1114; border: none;
+  border-radius: 6px; padding: 6px 14px; font: inherit; font-weight: 700; cursor: pointer;
+}
+button.primary:hover { filter: brightness(1.1); }
+button.ghost {
+  background: none; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px 12px; font: inherit; cursor: pointer;
+}
+button.ghost:hover { color: var(--text); border-color: var(--dim); }
+button.danger { color: var(--big-reach); border-color: rgba(239,68,68,.4); }
+
+.err { color: var(--big-reach); margin-top: 8px; white-space: pre-wrap; }
+.ok  { color: var(--steal); margin-top: 8px; }
+
+.mapgrid { overflow-x: auto; margin-top: 12px; }
+.mapgrid table { font-size: 11px; }
+.mapgrid select {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 5px;
+  padding: 2px 4px; font: inherit; max-width: 120px;
+}
+.mapgrid td { color: var(--dim); }
+.field { display: flex; align-items: center; gap: 6px; color: var(--dim); }
+.field select, .field input[type="number"] {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; font: inherit;
+}
+
+.unmatched { padding: 10px 12px; background: rgba(224,165,58,.08); border-bottom: 1px solid var(--line); }
+.unmatched ul { margin: 6px 0 0; padding-left: 18px; color: var(--dim); }
+.unmatched[hidden] { display: none; }
+
+/* ---- resize grip ---- */
+.grip {
+  position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, var(--line) 50%, var(--line) 60%, transparent 60%, transparent 72%, var(--line) 72%, var(--line) 82%, transparent 82%);
+}
+
+/* A name we could not find in Sleeper's player database: shown, but flagged,
+   so a typo is visible instead of quietly never matching a pick. */
+td.unresolved { color: var(--reach); border-bottom: 1px dotted rgba(224, 165, 58, .5); }
+
+/* Draft-slot picker in the toolbar. The dot and the countdown are both dead
+   without it, so it advertises itself until it is set. */
+.slotwrap { display: flex; align-items: center; gap: 5px; color: var(--dim); cursor: pointer; }
+.slotlabel { font-size: 11px; }
+.slotsel {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 3px 5px; font: inherit;
+}
+.slotsel:focus { outline: none; border-color: var(--accent); }
+.slotwrap.needed .slotlabel { color: var(--reach); font-weight: 700; }
+.slotwrap.needed .slotsel {
+  border-color: var(--reach);
+  color: var(--reach);
+  box-shadow: 0 0 0 2px rgba(224, 165, 58, .15);
+}
