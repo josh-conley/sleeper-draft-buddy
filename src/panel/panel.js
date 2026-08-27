@@ -2,7 +2,7 @@
 
 import { FIELDS } from '../lib/parse.js';
 import { bandFor } from '../lib/value.js';
-import { formatPick, picksUntilTurn } from '../lib/draft.js';
+import { formatPick } from '../lib/draft.js';
 import { clockState, clockTooltip } from '../lib/clock.js';
 import { picksUntilOwnedTurn } from '../lib/turn.js';
 import { renderSettings } from './settings.js';
@@ -62,8 +62,12 @@ export class Panel {
       picksAway: null,
       // Slot worked out from the draft itself, and the exact pick numbers you
       // own once trades are applied. Both arrive from main.js.
-      autoSlot: null,
       ownPicks: null,
+      // The signed-in account's names, the usernames on the board's header row,
+      // and whether the two met. Detected, never entered.
+      myNames: [],
+      boardNames: [],
+      usernameFound: null,
       reference: null,
       view: 'ranks',
       showUnmatched: false,
@@ -140,30 +144,23 @@ export class Panel {
     );
     this.countEl = el('span', { class: 'count' });
 
-    // The dot is meaningless without a draft slot, so ask for it in the toolbar
-    // rather than burying it behind the gear icon.
-    this.slotSel = el('select', {
-      class: 'slotsel',
-      onchange: () => this.patch({ slot: this.slotSel.value ? Number(this.slotSel.value) : null }),
-    });
-    this.slotWrap = el('label', { class: 'slotwrap' }, [
-      el('span', { class: 'slotlabel', text: 'Slot' }),
-      this.slotSel,
-    ]);
-
     this.toolbar = el('div', { class: 'toolbar' }, [
       el('div', { class: 'filters' }, this.filterBtns),
       this.search,
       el('label', { class: 'toggle' }, [this.showDrafted, el('span', { text: 'show drafted' })]),
-      this.slotWrap,
       this.countEl,
     ]);
+
+    // Shown when the saved username is not one of the teams on this board —
+    // the countdown would otherwise be confidently wrong, which is worse than
+    // saying nothing.
+    this.nameWarn = el('div', { class: 'namewarn', hidden: '' });
 
     this.unmatchedBox = el('div', { class: 'unmatched', hidden: '' });
     this.body = el('div', { class: 'body' });
     this.grip = el('div', { class: 'grip' });
 
-    this.wrap.append(this.header, this.toolbar, this.unmatchedBox, this.body, this.grip);
+    this.wrap.append(this.header, this.toolbar, this.nameWarn, this.unmatchedBox, this.body, this.grip);
     this.shadow.appendChild(this.wrap);
 
     this.wireDrag();
@@ -304,7 +301,6 @@ export class Panel {
       b.setAttribute('aria-pressed', String(this.settings.filter === FILTERS[i].id))
     );
     this.showDrafted.checked = !!this.settings.showDrafted;
-    this.renderSlotPicker();
     if (this.search.value !== (this.settings.search || '')) {
       this.search.value = this.settings.search || '';
     }
@@ -313,6 +309,7 @@ export class Panel {
     this.toolbar.style.display = settingsView ? 'none' : '';
     this.gearBtn.textContent = settingsView ? '✕' : '⚙';
 
+    this.renderNameWarning();
     this.body.textContent = '';
     if (settingsView) {
       renderSettings(
@@ -337,37 +334,47 @@ export class Panel {
   }
 
   /**
+   * Say when the panel cannot tell which team is yours.
+   *
+   * Two ways that happens: nobody is signed in to Sleeper, or the account is
+   * signed in but is not playing in this draft. Both are stated plainly rather
+   * than left to look like a stuck countdown — and neither is guessed around.
+   */
+  renderNameWarning() {
+    const { myNames, boardNames, usernameFound } = this.state;
+    const signedOut = !myNames.length && !!boardNames.length;
+    const notPlaying = usernameFound === false;
+    this.nameWarn.hidden = !(signedOut || notPlaying);
+    if (this.nameWarn.hidden) return;
+    this.nameWarn.textContent = '';
+    this.nameWarn.append(
+      el('span', {
+        text: signedOut
+          ? 'Not signed in to Sleeper in this browser, so the panel cannot tell which team is yours.'
+          : `Signed in as ${myNames[0]}, who is not in this draft — your turn cannot be tracked.`,
+      })
+    );
+  }
+
+  /**
    * The dot answers "how close am I to picking?", not "is the connection ok?".
    * Connection trouble degrades it to grey rather than showing a confident
    * colour that would be a lie.
    */
   renderDot() {
     const connected = this.state.status === 'live' && Number.isFinite(this.state.pickNo);
-    const source = this.slotSource();
-    const away = source ? this.state.picksAway : null;
+    // Only lit when your picks are actually known — which means the account was
+    // found on the board. Nothing is inferred.
+    const known = !!this.state.ownPicks?.size;
+    const away = known ? this.state.picksAway : null;
     this.dot.dataset.state = clockState(away, connected).id;
-    this.dot.title = clockTooltip(away, connected, source);
-  }
-
-  /**
-   * Your slot, and how we came by it. A slot you chose yourself always wins —
-   * detection fills the gap rather than overriding you, so a wrong guess is
-   * always correctable and never silently sticks.
-   * @returns {'user'|'auto'|null}
-   */
-  slotSource() {
-    if (this.settings.slot) return 'user';
-    return this.state.autoSlot ? 'auto' : null;
-  }
-
-  effectiveSlot() {
-    return this.settings.slot || this.state.autoSlot || null;
+    this.dot.title = clockTooltip(away, connected, known);
   }
 
   /**
    * The pick number of your next turn — what a "can I wait?" question is really
-   * asked against. Null until a slot is set, because without one there is no
-   * next turn and a colour would be a guess.
+   * asked against. Null until your team is known, because without that there is
+   * no next turn and a number would be a guess.
    */
   nextPickNo() {
     const { pickNo } = this.state;
@@ -377,44 +384,15 @@ export class Panel {
   }
 
   /**
-   * Distance to your next turn. Prefers the explicit set of picks you own,
-   * which is the only thing that stays right when a pick has been traded;
-   * snake arithmetic is the fallback for drafts with no ownership data.
+   * Distance to your next turn, from the explicit set of picks you own.
+   *
+   * There is no snake-order fallback on purpose: it cannot survive a trade, and
+   * a countdown that is quietly wrong is worse than one that says nothing.
    */
   computePicksAway() {
-    const { pickNo, teams, type, ownPicks } = this.state;
+    const { pickNo, ownPicks } = this.state;
     if (!Number.isFinite(pickNo)) return null;
-    const slot = this.effectiveSlot();
-    if (ownPicks?.size) return picksUntilOwnedTurn(pickNo, ownPicks);
-    return picksUntilTurn(pickNo, teams, slot, type);
-  }
-
-  /** Slot picker in the toolbar; highlighted until it is actually set. */
-  renderSlotPicker() {
-    const teams = this.state.teams || 12;
-    const auto = this.state.autoSlot;
-    const want = `${teams}|${this.settings.slot ?? ''}|${auto ?? ''}`;
-    if (this.slotSel.dataset.built !== want) {
-      this.slotSel.textContent = '';
-      // The empty option doubles as the readout for a detected slot, so the
-      // picker shows what is actually in force without pretending you set it.
-      this.slotSel.appendChild(el('option', { value: '', text: auto ? `auto ${auto}` : 'set…' }));
-      for (let i = 1; i <= teams; i++) {
-        const o = el('option', { value: String(i), text: String(i) });
-        if (this.settings.slot === i) o.selected = true;
-        this.slotSel.appendChild(o);
-      }
-      this.slotSel.dataset.built = want;
-    }
-    const unset = !this.settings.slot;
-    // Only nag when nothing at all is known — a detected slot is a working slot.
-    this.slotWrap.classList.toggle('needed', unset && !auto);
-    this.slotWrap.classList.toggle('auto', unset && !!auto);
-    this.slotWrap.title = !unset
-      ? `Drafting from slot ${this.settings.slot}`
-      : auto
-        ? `Slot ${auto}, detected from the draft. Choose one here to override it.`
-        : 'Pick your draft slot to turn on the on-the-clock dot and the countdown';
+    return picksUntilOwnedTurn(pickNo, ownPicks);
   }
 
   renderHeaderInfo() {

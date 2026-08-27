@@ -38,7 +38,8 @@ const ok = (c, l) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${l}`); if (!c) fail
 
 const settings = {
   filter: 'ALL', search: '', showDrafted: false, sortKey: 'myRank', sortDir: 'asc',
-  pollMs: 2000, slot: 7, panel: { x: 100, y: 80, w: 720, h: 560, collapsed: false },
+  pollMs: 2000,
+  panel: { x: 100, y: 80, w: 720, h: 560, collapsed: false },
 };
 const saved = [];
 const reorders = [];
@@ -182,35 +183,39 @@ ok($('.chip-warn').hidden, 'chip hides when nothing is unmatched');
 
 // the status dot now reports clock proximity, not connection health
 const dotState = () => $('.dot').dataset.state;
-panel.update({ status: 'live', teams: 12, type: 'snake', pickNo: 21 });
-panel.patch({ slot: 9 });   // pick 21 is 2.09; slot 9 picks again at 2.04? -> compute
-const away = panel.state.picksAway;
-ok(typeof away === 'number', `picksAway computed (${away})`);
-panel.patch({ slot: null });
-ok(dotState() === 'unknown', 'dot is grey with no slot set');
+// The countdown comes from the picks you own — there is no slot, and no snake
+// arithmetic to fall back on, because neither survives a trade.
+panel.update({ status: 'live', teams: 12, type: 'snake', pickNo: 21, ownPicks: new Set([21, 28]) });
+ok(panel.state.picksAway === 0, `picksAway computed from owned picks (${panel.state.picksAway})`);
+panel.update({ pickNo: 22 });
+ok(panel.state.picksAway === 6, `and counts on to the next one (${panel.state.picksAway})`);
+panel.update({ ownPicks: null });
+ok(dotState() === 'unknown', 'dot is grey when it does not know which picks are yours');
+
 // drive each band directly
 for (const [n, want] of [[0, 'on-clock'], [1, 'soon'], [4, 'soon'], [5, 'far'], [40, 'far']]) {
-  panel.settings.slot = 1; panel.state.picksAway = n; panel.renderDot();
+  panel.state.ownPicks = new Set([1]); panel.state.picksAway = n; panel.renderDot();
   ok(dotState() === want, `dot: ${n} picks away -> ${want} (${dotState()})`);
 }
 // Regression: the dot used to render one update behind, because picksAway was
 // computed in renderHeaderInfo() *after* renderDot() had already read it.
-panel.settings.slot = 12; panel.update({ status: 'live', teams: 12, type: 'snake', pickNo: 12 });
+panel.update({ status: 'live', teams: 12, type: 'snake', pickNo: 12, ownPicks: new Set([12, 13]) });
 ok($('.dot').dataset.state === 'on-clock',
    `dot is correct on the first render after an update (${$('.dot').dataset.state}, away=${panel.state.picksAway})`);
 panel.update({ pickNo: 1 });
 ok($('.dot').dataset.state === 'far', `dot updates immediately, not one render late (${$('.dot').dataset.state})`);
 
-// the toolbar slot picker
-ok(!!$('.slotsel'), 'slot picker is in the toolbar, not only behind the gear');
-panel.patch({ slot: null });
-ok($('.slotwrap').classList.contains('needed'), 'slot picker is highlighted while unset');
-ok($$('.slotsel option').length === 13, `slot picker offers 12 slots plus a placeholder (${$$('.slotsel option').length})`);
-panel.patch({ slot: 7 });
-ok(!$('.slotwrap').classList.contains('needed'), 'highlight clears once a slot is chosen');
-ok($('.slotsel').value === '7', 'slot picker reflects the saved slot');
+// The draft-slot picker is gone: your team comes from the account on the board,
+// and a slot cannot express a traded pick anyway.
+ok(!$('.slotsel'), 'there is no draft slot picker in the toolbar');
+ok(!$('.slotwrap'), 'nor its label');
+panel.setView('settings');
+ok(!$('select') || ![...$$('select')].some((el) => /^\d+$/.test(el.options?.[1]?.text || '')),
+   'and none behind the gear either');
+panel.setView('ranks');
 
-panel.settings.slot = 1; panel.state.picksAway = 0; panel.state.status = 'error'; panel.renderDot();
+panel.state.ownPicks = new Set([1]);
+panel.state.picksAway = 0; panel.state.status = 'error'; panel.renderDot();
 ok(dotState() === 'unknown', 'dot goes grey when the feed is down rather than lying');
 panel.state.status = 'live';
 
@@ -221,7 +226,7 @@ ok(
   $$('.settings a').some((a) => (a.getAttribute('href') || '').includes('rankings.html')),
   'settings view links to the ranking page'
 );
-ok($$('.settings select').length >= 1, 'slot selector present');
+ok($$('.settings select').length === 0, 'no slot selector behind the gear either');
 panel.setView('ranks');
 ok(!!$('table'), 'returns to the table');
 
@@ -245,6 +250,73 @@ panel.toggleCollapse();
   );
   ok(!/\.dot[^}]*var\(--steal\)/.test(styles), 'and the dot no longer borrows --steal');
 }
+
+// ---------- knowing which team is yours ----------
+// Detected from the signed-in Sleeper account, never typed. The panel shows the
+// ranks regardless; what the account decides is whether the dot and countdown
+// can say anything.
+panel.setView('ranks');
+ok(!!$('table'), 'the ranking table is shown without asking for anything');
+ok(!$('.nameinput'), 'there is no username entry box');
+
+// Nobody signed in: say so rather than let it look like a stuck countdown.
+panel.update({ myNames: [], boardNames: ['Haunter151', 'JoshC94'], usernameFound: null });
+ok(!panel.nameWarn.hidden, 'signed out, with a board on screen, warns');
+ok(/not signed in/i.test(panel.nameWarn.textContent), `and says why: "${panel.nameWarn.textContent.slice(0, 48)}"`);
+ok(!panel.nameWarn.querySelector('button'), 'with no button, because there is nothing to type');
+
+// Signed in, but playing in someone else's draft.
+panel.update({ myNames: ['Stranger'], boardNames: ['Haunter151', 'JoshC94'], usernameFound: false });
+ok(!panel.nameWarn.hidden, 'an account not in this draft warns');
+ok(/not in this draft/i.test(panel.nameWarn.textContent), 'and names the account it found');
+
+// Found: no warning at all.
+panel.update({ myNames: ['JoshC94'], boardNames: ['Haunter151', 'JoshC94'], usernameFound: true });
+ok(panel.nameWarn.hidden, 'no warning once the account is found on the board');
+
+// Before any board has been read there is nothing to complain about yet.
+panel.update({ myNames: ['JoshC94'], boardNames: [], usernameFound: null });
+ok(panel.nameWarn.hidden, 'and none before a board has been read');
+panel.update({ myNames: [], boardNames: [], usernameFound: null });
+ok(panel.nameWarn.hidden, 'signed out on a page with no board is not an error either');
+
+// Hiding must actually hide.
+//
+// The `hidden` attribute hides only through the user agent's display:none, so
+// ANY author `display` rule outranks it. `.namewarn { display: flex }` without a
+// matching [hidden] rule left a bare amber bar stretched across the panel with
+// no text in it, through several rounds of "it's still there".
+//
+// This is checked against the stylesheet rather than computed styles on
+// purpose: jsdom does not apply shadow-root CSS, so getComputedStyle here
+// reports the user agent default and would pass whether or not the rule exists.
+const panelSrc = readFileSync(new URL('../src/panel/panel.js', import.meta.url), 'utf8');
+const cssSrc = readFileSync(new URL('../src/panel/panel.css', import.meta.url), 'utf8');
+
+// Elements the panel toggles with .hidden, and the class each was built with.
+const hidden = [...panelSrc.matchAll(/this\.(\w+)\.hidden\s*=/g)].map((m) => m[1]);
+const classOf = (prop) => {
+  const m = panelSrc.match(new RegExp(`this\\.${prop}\\s*=\\s*el\\([^)]*?class:\\s*'([\\w-]+)'`, 's'));
+  return m ? m[1] : null;
+};
+const toggled = [...new Set(hidden)].map(classOf).filter(Boolean);
+ok(toggled.length >= 2, `found the elements the panel hides (${toggled.join(', ')})`);
+
+for (const cls of toggled) {
+  // Only a class the stylesheet gives a display to can outrank the attribute.
+  const setsDisplay = new RegExp(`\\.${cls}\\s*\\{[^}]*display:`, 's').test(cssSrc);
+  if (!setsDisplay) continue;
+  ok(new RegExp(`\\.${cls}\\[hidden\\]\\s*\\{[^}]*display:\\s*none`).test(cssSrc),
+     `.${cls} sets a display, so it needs a [hidden] rule to stay hidden`);
+}
+
+// The countdown comes from the picks you own, so a pick traded to you counts
+// and one sitting in your column that you sold does not.
+panel.update({ status: 'live', teams: 12, pickNo: 3, ownPicks: new Set([1, 13, 23]) });
+ok(panel.state.picksAway === 10, `countdown runs to the next owned pick (${panel.state.picksAway})`);
+panel.update({ pickNo: 13 });
+ok(panel.state.picksAway === 0, 'zero when an owned pick is up');
+ok($('.dot').dataset.state === 'on-clock', 'and the dot goes green with no slot involved');
 
 console.log(fails ? `\n${fails} failing check(s)` : '\nAll render checks passed');
 process.exit(fails ? 1 : 0);

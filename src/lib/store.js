@@ -16,7 +16,6 @@ export const DEFAULT_SETTINGS = {
   sortKey: 'myRank',
   sortDir: 'asc',
   pollMs: 2000,
-  slot: null,
   panel: { x: null, y: 80, w: 720, h: 560, collapsed: false },
 };
 

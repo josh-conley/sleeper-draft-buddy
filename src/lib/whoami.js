@@ -1,7 +1,7 @@
 // Who is looking at this draft?
 //
-// Knowing the logged-in Sleeper account is what lets the panel work out your
-// draft slot on its own, instead of making you pick it from a dropdown.
+// Knowing the logged-in Sleeper account is what lets the panel find your team
+// on the draft board without asking you to type anything.
 //
 // A content script shares the page's origin, so sleeper.com's own localStorage
 // is readable from here. Sleeper keeps the signed-in id under a plain "user_id"
@@ -9,8 +9,8 @@
 // parsed, not used raw (an unparsed id 404s the user endpoint into a null).
 // The shape of that storage is not a contract, so a miss falls back to scanning
 // every stored value for something user-shaped. Finding nothing is normal —
-// logged out, or Sleeper moved its session — and just means the slot stays
-// manual, exactly as it was before.
+// logged out, or Sleeper moved its session — and the panel says so rather than
+// guessing at which team is yours.
 
 const API = 'https://api.sleeper.app/v1';
 const ID_KEYS = ['user_id', 'userId'];
@@ -63,8 +63,8 @@ export function readSleeperUserId(win = globalThis) {
 }
 
 /**
- * Display names for that id. Only needed for the DOM fallback, which finds your
- * column by reading your name off the board header.
+ * Display names for that id — display_name and username, since the board's
+ * header row may carry either. Matched case-insensitively against it.
  * @returns {Promise<string[]>}
  */
 export async function fetchUserNames(userId, fetchFn = fetch) {

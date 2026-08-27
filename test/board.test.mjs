@@ -53,10 +53,13 @@ ok(r.picks[0].metadata.team === 'DET' && r.picks[0].metadata.position === 'RB', 
 
 // ---------- legacy board (sleeper.com/draft/nfl/...) ----------
 // NOTE: the legacy board abbreviates first names ("J. Gibbs").
-const legacyCell = (name, pos, team, pick) => `
+// The live board renders the bye alongside the team: "WR - CIN (10)". Leaving
+// it out of this fixture is what let an anchored regex pass here and match
+// nothing at all on a real board.
+const legacyCell = (name, pos, team, pick, bye = 9) => `
 <div class="cell-container"><div class="cell ${pos.toLowerCase()} drafted">
   <div class="pick">${pick}</div>
-  <div class="player"><div class="player-name">${name}</div><div class="position">${pos} - ${team}</div></div>
+  <div class="player"><div class="player-name">${name}</div><div class="position">${pos} - ${team} (${bye})</div></div>
 </div></div>`;
 const legacyClock = (pick) => `
 <div class="cell-container"><div class="cell false current-pick is-active">
@@ -75,7 +78,12 @@ r = readBoard();
 ok(r.picks.length === 3, `legacy: 3 picks (${r.picks.length})`);
 ok(r.picks.map((p) => p._label).join(',') === '1.1,1.2,1.3', 'legacy: sorted into pick order');
 ok(r.clockLabel === '1.4', `legacy: on-the-clock label read (${r.clockLabel})`);
-ok(r.picks[0].metadata.position === 'RB' && r.picks[0].metadata.team === 'DET', 'legacy: "RB - DET" split');
+ok(r.picks[0].metadata.position === 'RB' && r.picks[0].metadata.team === 'DET',
+   'legacy: "RB - DET (9)" splits, bye and all');
+// Both forms are in the wild; neither may fall through to a null position,
+// because the abbreviated-name matching tier depends on it.
+document.body.innerHTML = legacyCell('J. Gibbs', 'RB', 'DET', '1.1').replace(' (9)', '');
+ok(readBoard().picks[0].metadata.team === 'DET', 'legacy: and still splits with no bye');
 
 // The abbreviated first name must still match a full-name ranking row, via the
 // last-name + position + team tier in names.js.
@@ -132,6 +140,31 @@ document.body.insertAdjacentHTML('beforeend', '<div class="noise">x</div>');
 await new Promise((r) => setTimeout(r, 50));
 ok(calls === 2, 'unrelated DOM churn does not re-emit');
 stop();
+
+// ---------- a trade lands between picks ----------
+// A trade re-badges a cell without adding a pick. Keyed on the pick list alone,
+// nothing would fire until somebody drafted — so a trade agreed while the clock
+// ran would leave the countdown wrong for exactly as long as it mattered.
+document.body.innerHTML =
+  betaCell('Bijan', 'Robinson', 'RB', 'ATL', 11, '1.1') +
+  betaClock('1.2');
+
+let scans = 0, changes = 0;
+const stopTrade = watchBoard(() => { changes++; }, { debounceMs: 0, onScan: () => { scans++; } });
+ok(scans === 1 && changes === 1, `initial scan reports both (${scans}/${changes})`);
+
+// A badge appears on an already-drafted cell: no new pick, no clock movement.
+document.querySelector('[class*="bg-dls-picked-"]')
+  .insertAdjacentHTML('beforeend', '<span>Haunter151</span>');
+await new Promise((r) => setTimeout(r, 30));
+ok(scans === 2, `a trade badge triggers a scan (${scans})`);
+ok(changes === 1, 'without pretending a pick was made');
+
+// A real pick still reports as a change, as before.
+document.body.insertAdjacentHTML('beforeend', betaCell('Jahmyr', 'Gibbs', 'RB', 'DET', 6, '1.2'));
+await new Promise((r) => setTimeout(r, 30));
+ok(changes === 2, `a pick still reports a change (${changes})`);
+stopTrade();
 
 document.body.innerHTML = '<div>no draft board here</div>';
 ok(detectAdapter() === null, 'no adapter on a non-draft page');

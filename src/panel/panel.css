@@ -242,25 +242,6 @@ button.danger { color: var(--big-reach); border-color: rgba(239,68,68,.4); }
    so a typo is visible instead of quietly never matching a pick. */
 td.unresolved { color: var(--reach); border-bottom: 1px dotted rgba(224, 165, 58, .5); }
 
-/* Draft-slot picker in the toolbar. The dot and the countdown are both dead
-   without it, so it advertises itself until it is set. */
-.slotwrap { display: flex; align-items: center; gap: 5px; color: var(--dim); cursor: pointer; }
-.slotlabel { font-size: 11px; }
-.slotsel {
-  background: var(--bg); color: var(--text);
-  border: 1px solid var(--line); border-radius: 6px;
-  padding: 3px 5px; font: inherit;
-}
-.slotsel:focus { outline: none; border-color: var(--accent); }
-.slotwrap.needed .slotlabel { color: var(--reach); font-weight: 700; }
-.slotwrap.needed .slotsel {
-  border-color: var(--reach);
-  color: var(--reach);
-  box-shadow: 0 0 0 2px rgba(224, 165, 58, .15);
-}
-/* Slot worked out from the draft rather than chosen: stated, not shouted. */
-.slotwrap.auto .slotsel { color: var(--dim); font-style: italic; }
-
 /* Drag to reorder, available only while sorted by your own rank. */
 tr.draggable { cursor: grab; }
 tr.dragging { opacity: 0.35; }
@@ -273,3 +254,18 @@ tr.over td { box-shadow: inset 0 2px 0 0 var(--amber, #e0a53a); }
 /* The overall pick numbers sit beside the round.pick label, quieter than it —
    they are the reference the ADP column is read against, not the headline. */
 .pickinfo .overall { color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* The panel cannot tell which team is yours: loud enough to notice mid-draft. */
+.namewarn {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; font-size: 12px;
+  color: var(--reach);
+  background: rgba(224, 165, 58, .12);
+  border-top: 1px solid rgba(224, 165, 58, .35);
+  border-bottom: 1px solid rgba(224, 165, 58, .35);
+}
+/* Required, not decorative: the `hidden` attribute only hides through the user
+   agent's display:none, so the display:flex above outranks it and leaves an
+   empty amber bar sitting across the panel. Every hideable element here needs
+   its own [hidden] rule for the same reason. */
+.namewarn[hidden] { display: none; }

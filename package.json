@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Chrome extension: rank players from live ADP, then get a draft overlay that crosses them off as they are drafted on either Sleeper board.",
   "scripts": {
-    "test": "node test/wiring.test.mjs && node test/board.test.mjs && node test/onclock.test.mjs && node test/adp.test.mjs && node test/ambiguity.test.mjs && node test/enrich.test.mjs && node test/value.test.mjs && node test/render.test.mjs && node test/rows.test.mjs && node test/rankings.test.mjs && node test/ext.test.mjs",
+    "test": "node test/wiring.test.mjs && node test/board.test.mjs && node test/onclock.test.mjs && node test/adp.test.mjs && node test/seed.test.mjs && node test/ambiguity.test.mjs && node test/enrich.test.mjs && node test/value.test.mjs && node test/render.test.mjs && node test/rows.test.mjs && node test/rankings.test.mjs && node test/ext.test.mjs",
     "test:live": "node test/live-enrich.mjs",
     "icons": "node tools/make-icons.mjs",
     "build": "node tools/build.mjs",

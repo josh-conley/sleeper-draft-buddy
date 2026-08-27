@@ -75,15 +75,27 @@ Click **Load list**. That's it — you don't need a spreadsheet.
 Defenses and kickers are ignored on purpose.
 </details>
 
-## 5. Set your draft slot
+## 5. Nothing to set
 
-In the panel's toolbar there's a **Slot** dropdown, highlighted in orange until
-you set it. Pick the position you're drafting from (1 = first pick).
+The panel finds your team on its own, from the Sleeper account you're signed in
+with in this browser. It reads the board's header row for your username, then
+works out which picks are yours — including any you traded for, and excluding
+any you traded away.
 
-This turns on the dot at the top-left of the panel:
+That drives the dot at the top-left of the panel:
 
 | | |
 |---|---|
+| 🟢 **green, pulsing** | you're on the clock |
+| 🟡 **yellow** | 1–4 picks away |
+| 🔴 **red** | 5+ picks away |
+| ⚪ **grey** | no draft data, or it can't tell which team is yours |
+
+If it can't tell, it says so in a bar across the top of the panel: either you're
+not signed in to Sleeper in this browser, or the account you're signed in as
+isn't playing in this draft.
+
+---|---|
 | 🟢 **green, pulsing** | you're on the clock |
 | 🟡 **yellow** | 1–4 picks away |
 | 🔴 **red** | 5+ picks away |

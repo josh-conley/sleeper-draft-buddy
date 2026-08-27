@@ -118,15 +118,21 @@ export const legacyAdapter = {
   detect: (root) =>
     !!labelledCell(root, legacyAdapter.SELECTORS.pickedCell + ', ' + legacyAdapter.SELECTORS.clockCell),
 
-  // Cell contains .pick "1.1", .player-name "J. Gibbs", .position "RB - DET".
+  // Cell contains .pick "1.1", .player-name "J. Gibbs", .position "RB - DET (6)".
   // NOTE the abbreviated first name — full-name matching cannot work here, so
-  // names.js falls through to its last-name + position + team tier.
+  // names.js falls through to its last-name + position + team tier, and that
+  // tier is only reachable if BOTH position and team parse.
+  //
+  // The trailing bye is optional in the pattern for exactly that reason: it is
+  // present on the live board and was absent from the fixture this was written
+  // against, so an anchored match silently produced a null position and team
+  // for every cell, and a completed 180-pick board matched nothing at all.
   parseCell(cell) {
     const s = this.SELECTORS;
     const label = cell.querySelector(s.pick)?.textContent.trim() || null;
     const name = cell.querySelector(s.name)?.textContent.trim() || '';
     const posTeam = cell.querySelector(s.position)?.textContent.trim() || '';
-    const m = posTeam.match(/^([A-Za-z/]+)\s*-\s*([A-Za-z]{2,3})$/);
+    const m = posTeam.match(/^([A-Za-z/]+)\s*-\s*([A-Za-z]{2,3})(?:\s*\(\d{1,2}\))?$/);
     return toPick(name, m ? m[1].toUpperCase() : null, m ? m[2].toUpperCase() : '', label);
   },
 
@@ -146,14 +152,13 @@ export const legacyAdapter = {
 
 // --------------------------------------------------------- column geometry
 //
-// Fallback for working out YOUR draft slot when the API cannot say — a public
-// mock has no draft_order to look you up in.
+// Calibration for everything below: which column is which.
 //
 // Both boards label every cell, drafted or empty ("1.02", "2.11"), and both lay
 // the columns out left to right in slot order. So the labels themselves
 // calibrate the grid: read each label, work out which slot it belongs to, and
-// the cell's horizontal centre becomes that column's x. Your name in the header
-// then lands in one of those columns.
+// the cell's horizontal centre becomes that column's x. A username in the
+// header row then lands in one of those columns.
 //
 // This finds your SLOT — where you drafted from. It deliberately does not try
 // to answer "is it my turn", because a traded pick is drafted by someone who
@@ -162,6 +167,8 @@ export const legacyAdapter = {
 
 const MIN_COL_W = 56;
 const MAX_COL_W = 400;
+/** Rows of text this close together are treated as one row. */
+const HEADER_BAND_PX = 8;
 
 /** Walk up from a label to the cell that holds it. */
 function cellOf(el, rectOf) {
@@ -188,11 +195,13 @@ export function readColumns(root = document, { teams, type = 'snake', rectOf = (
     if (r.width < MIN_COL_W || r.width > MAX_COL_W) continue;
     const slot = slotForPick(labelToPickNo(label, teams), teams, type);
     if (!slot) continue;
-    if (!xs.has(slot)) xs.set(slot, []);
-    xs.get(slot).push(r.x + r.width / 2);
+    if (!xs.has(slot)) xs.set(slot, { cx: [], top: Infinity });
+    const col = xs.get(slot);
+    col.cx.push(r.x + r.width / 2);
+    if (r.y < col.top) col.top = r.y;
   }
   return [...xs.entries()]
-    .map(([slot, list]) => ({ slot, cx: list.reduce((a, b) => a + b, 0) / list.length }))
+    .map(([slot, { cx, top }]) => ({ slot, cx: cx.reduce((a, b) => a + b, 0) / cx.length, top }))
     .sort((a, b) => a.cx - b.cx);
 }
 
@@ -208,34 +217,112 @@ function columnAt(columns, x) {
   return best && best.d <= pitch / 2 ? best.slot : null;
 }
 
+// ------------------------------------------------------------ pick ownership
+//
+// Who drafts each pick, read straight off the board.
+//
+// Every cell belongs to the team whose column it sits in, EXCEPT a traded pick,
+// which both boards mark with the acquiring username inside the cell — legacy
+// in a .pick-traded element, beta in a small badge pinned to the cell's corner.
+// Neither is worth selecting by class: the reliable test is that the text
+// matches one of the usernames in the header row, which is data the board
+// itself supplies.
+//
+// This is what makes trades work without asking Sleeper's API anything. It is
+// also the only route that works on a mock, where there is no draft order to
+// look anybody up in.
+
+/** Text of an element if it is a short, single-line leaf. */
+function leafText(el) {
+  if (el.children.length) return null;
+  const t = el.textContent.trim();
+  return t && t.length <= 30 ? t : null;
+}
+
 /**
- * Your slot, by finding your account name in the board header.
+ * The username above each column.
  *
- * The header is above the grid, so candidates are ranked by how high they sit —
- * your name also appears in side panels ("drafted players: JoshC94"), and those
- * are both lower down and usually outside the grid's columns.
+ * Candidates are filtered by position, not by class: a name only counts if it
+ * sits above the grid and lines up with a column the pick labels identified.
+ * Chat buttons and side panels are excluded by geometry alone, which survives
+ * a restyle in a way that a class list does not.
  *
- * @param {string[]} names  display name and username
+ * @returns {Map<number, string>} slot -> username
  */
-export function readOwnSlot(root = document, names = [], opts = {}) {
-  const wanted = names.map((n) => String(n).trim().toLowerCase()).filter(Boolean);
-  if (!wanted.length) return null;
+export function readHeaders(root = document, opts = {}) {
   const rectOf = opts.rectOf || ((e) => e.getBoundingClientRect());
   const columns = opts.columns || readColumns(root, { ...opts, rectOf });
-  if (columns.length < 2) return null;
+  if (columns.length < 2) return new Map();
 
-  const hits = [];
-  for (const el of root.querySelectorAll('*')) {
-    if (el.children.length) continue;
-    const t = el.textContent.trim();
-    if (t.length > 40 || !wanted.includes(t.toLowerCase())) continue;
+  const gridTop = opts.gridTop ?? Math.min(...columns.map((c) => c.top ?? Infinity));
+  const candidates = [];
+  for (const el of root.querySelectorAll('div,span,h1,h2,h3,button,a')) {
+    const text = leafText(el);
+    if (!text || PICK_RE.test(text)) continue;
     const r = rectOf(el);
+    if (Number.isFinite(gridTop) && r.y >= gridTop) continue;
     const slot = columnAt(columns, r.x + r.width / 2);
-    if (slot) hits.push({ slot, y: r.y });
+    if (!slot) continue;
+    candidates.push({ text, slot, y: r.y });
   }
-  if (!hits.length) return null;
-  hits.sort((a, b) => a.y - b.y);
-  return hits[0].slot;
+
+  // Group what is left into horizontal bands. Taking the topmost name per
+  // column instead would pick up whatever page furniture sits above the board —
+  // "Flip board layout", "Draft Completed" — and on a real draft that silently
+  // stole five of the twelve columns, this user's included.
+  candidates.sort((a, b) => a.y - b.y);
+  const bands = [];
+  for (const c of candidates) {
+    const band = bands.find((b) => Math.abs(b.y - c.y) <= HEADER_BAND_PX);
+    if (band) { band.items.push(c); band.y = (band.y + c.y) / 2; }
+    else bands.push({ y: c.y, items: [c] });
+  }
+
+  // The header row is the one row that spans the most columns; a toolbar spans
+  // two or three. Ties go to whichever sits closest to the grid.
+  let best = null;
+  for (const b of bands) {
+    const cover = new Set(b.items.map((i) => i.slot)).size;
+    if (!best || cover > best.cover || (cover === best.cover && b.y > best.y)) {
+      best = { cover, y: b.y, items: b.items };
+    }
+  }
+  const out = new Map();
+  for (const i of best?.items || []) if (!out.has(i.slot)) out.set(i.slot, i.text);
+  return out;
+}
+
+/**
+ * Who owns each pick on the board.
+ *
+ * @returns {Map<string, string>} pick label ("3.07") -> username
+ */
+export function readOwners(root = document, opts = {}) {
+  const rectOf = opts.rectOf || ((e) => e.getBoundingClientRect());
+  const columns = opts.columns || readColumns(root, { ...opts, rectOf });
+  const headers = opts.headers || readHeaders(root, { ...opts, columns, rectOf });
+  if (!headers.size) return new Map();
+
+  const known = new Set([...headers.values()].map((n) => n.toLowerCase()));
+  const owners = new Map();
+
+  for (const el of root.querySelectorAll('div,span')) {
+    const text = leafText(el);
+    if (!text || !PICK_RE.test(text)) continue;
+    const cell = cellOf(el, rectOf);
+    const r = rectOf(cell);
+    if (r.width < MIN_COL_W || r.width > MAX_COL_W) continue;
+
+    // A username inside the cell means the pick was traded to that person; with
+    // no badge it belongs to whoever sits above the column.
+    const badge = [...cell.querySelectorAll('div,span')]
+      .map(leafText)
+      .find((t) => t && known.has(t.toLowerCase()));
+    const slot = columnAt(columns, r.x + r.width / 2);
+    const owner = badge || (slot ? headers.get(slot) : null);
+    if (owner) owners.set(text, owner);
+  }
+  return owners;
 }
 
 export const ADAPTERS = [betaAdapter, legacyAdapter];
@@ -272,7 +359,7 @@ export function readBoard(root = document, adapter = detectAdapter(root)) {
  * Watch the board. Calls onChange({adapter, picks, clockLabel}) whenever the
  * set of made picks or the on-the-clock pick changes. Returns stop().
  */
-export function watchBoard(onChange, { debounceMs = 150, selfTestMs = 8000 } = {}) {
+export function watchBoard(onChange, { debounceMs = 150, selfTestMs = 8000, onScan = null } = {}) {
   let timer = null;
   let lastKey = null;
   let adapter = null;
@@ -282,6 +369,14 @@ export function watchBoard(onChange, { debounceMs = 150, selfTestMs = 8000 } = {
     if (!adapter) adapter = detectAdapter();
     const res = readBoard(document, adapter);
     if (res.adapter) { adapter = res.adapter; sawBoard = true; }
+
+    // Every scan, not only the ones that changed the picks. A trade re-badges a
+    // cell without adding a pick, so keying this on the pick list alone would
+    // hold a stale answer until somebody drafted — for a trade agreed between
+    // picks, the countdown would be wrong for exactly as long as it mattered.
+    // Measured at ~3ms on a full 15-round board, behind the same debounce.
+    onScan?.(res);
+
     const key = `${res.adapter?.id}|${res.clockLabel}|${res.picks.map((p) => p._label).join(',')}`;
     if (key === lastKey) return;
     lastKey = key;

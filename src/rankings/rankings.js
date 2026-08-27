@@ -9,6 +9,7 @@ import { parsePaste, buildRows } from '../lib/parse.js';
 import { loadReference, enrichRows, renumber } from '../lib/enrich.js';
 import { normalize } from '../lib/names.js';
 import { fetchAdp, loadAdp, saveAdp, BOARD_DEPTH } from '../lib/adp.js';
+import { buildRankingRows } from '../lib/seed.js';
 
 const $ = (id) => document.getElementById(id);
 // FLEX is what you actually draft from in the middle rounds, so it earns a
@@ -63,24 +64,21 @@ async function save() {
   render();
 }
 
-/**
- * Build ranking rows from a list of names. Through buildRows, never around it:
- * it is what assigns each row the id every lookup in names.js is keyed by, and
- * hand-made rows silently match no picks at all.
- *
- * `offset` keeps appended ids clear of the ones already on the board — reusing
- * an id would quietly transfer a mid-draft "drafted" mark to another player.
- */
-function makeRows(names, offset = 0) {
-  const built = buildRows(names.map((n) => [n]), ['name']);
-  return offset ? built.map((r, i) => ({ ...r, id: `r${offset + i}` })) : built;
-}
-
 async function enrich(list) {
   reference = reference || (await loadReference().catch(() => null));
   if (!reference) return list.map((r, i) => ({ ...r, myRank: r.myRank ?? i + 1 }));
   const { rows: enriched } = enrichRows(list, reference);
   return enriched;
+}
+
+/**
+ * Rows from ADP names, through the shared builder the install-time seed uses.
+ * Same path in for both, so the list you get on a fresh install and the list
+ * you get from this page can never be different shapes.
+ */
+async function rowsFromNames(names, offset = 0) {
+  reference = reference || (await loadReference().catch(() => null));
+  return buildRankingRows(names, offset, reference);
 }
 
 /** Seed an empty board from ADP, or fold a fresh pull into an existing one. */
@@ -89,7 +87,7 @@ async function applyAdp(board) {
   await saveAdp(board);
 
   if (!rows.length) {
-    rows = await enrich(makeRows(board.players.map((p) => p.name)));
+    rows = await rowsFromNames(board.players.map((p) => p.name));
     await save();
     note(`Seeded ${rows.length} players in Sleeper ADP order (${board.date}). Drag to make it yours.`);
     return;
@@ -102,7 +100,7 @@ async function applyAdp(board) {
   const fresh = board.players.filter((p) => !known.has(normalize(p.name)));
   if (fresh.length) {
     const nextId = rows.length;
-    const added = await enrich(makeRows(fresh.map((p) => p.name), nextId));
+    const added = await rowsFromNames(fresh.map((p) => p.name), nextId);
     rows = [...rows, ...added];
     await save();
   }

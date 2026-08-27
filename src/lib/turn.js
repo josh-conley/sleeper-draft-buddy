@@ -8,6 +8,7 @@
 // asks of it: are you up, and how long until you are.
 
 import { slotForPick } from './draft.js';
+import { labelToPickNo } from './board.js';
 
 /** Every overall pick number belonging to a column, ignoring trades. */
 export function slotPickNos(slot, teams, rounds, type = 'snake') {
@@ -81,4 +82,86 @@ export function picksUntilOwnedTurn(pickNo, ownedPicks) {
 /** Are you the one on the clock at this pick? */
 export function isOnClock(pickNo, ownedPicks) {
   return !!(Number.isFinite(pickNo) && ownedPicks?.has(pickNo));
+}
+
+/**
+ * Your picks, read off the board by username.
+ *
+ * This is the primary route, and the only one that needs nothing from Sleeper's
+ * API: the board states who owns every pick, trades included, so a slot and a
+ * traded-picks feed are not required to answer the question. Ownership is a
+ * name match, never a column — a pick you bought sits in the seller's column
+ * and still comes back as yours.
+ *
+ * @param {Map<string,string>} owners    pick label -> username
+ * @param {string} username              yours
+ * @returns {Set<number>} overall pick numbers
+ */
+export function ownedFromBoard(owners, username, teams) {
+  const mine = new Set();
+  const me = namesOf(username);
+  if (!owners?.size || !me.size || !teams) return mine;
+  for (const [label, owner] of owners) {
+    if (!me.has(String(owner).trim().toLowerCase())) continue;
+    const pickNo = labelToPickNo(label, teams);
+    if (Number.isFinite(pickNo)) mine.add(pickNo);
+  }
+  return mine;
+}
+
+/**
+ * An account answers to more than one name: Sleeper's header row shows the
+ * display name, while the account also has a username, and they differ in case
+ * if not entirely. Either is accepted.
+ */
+function namesOf(username) {
+  const list = Array.isArray(username) ? username : [username];
+  return new Set(list.filter(Boolean).map((n) => String(n).trim().toLowerCase()).filter(Boolean));
+}
+
+/** Is this account one of the teams on the board? */
+export function usernameOnBoard(headers, username) {
+  const me = namesOf(username);
+  if (!headers?.size || !me.size) return false;
+  return [...headers.values()].some((n) => me.has(String(n).trim().toLowerCase()));
+}
+
+/**
+ * Fold what the board shows over a set of picks derived from elsewhere.
+ *
+ * The two sources answer different halves of the question. Sleeper's
+ * traded_picks feed covers every round, drafted or not, which is what a
+ * countdown needs — it looks forward, at cells that have not happened yet, and
+ * a badge that only appears once a pick is made would be no help there. The
+ * board, meanwhile, is the only source that works on a mock and is the truth
+ * for anything actually rendered.
+ *
+ * So the feed lays the base and the board overrides it: a rendered cell badged
+ * to you is yours whatever the feed said, and one badged to somebody else is
+ * not yours even if it sits in your column.
+ *
+ * @param {Set<number>} base    picks from the traded-picks feed, or snake order
+ * @param {Map<string,string>} owners  pick label -> username, from the board
+ */
+export function applyBoardOwnership(base, owners, username, teams) {
+  const mine = new Set(base || []);
+  const me = namesOf(username);
+  if (!owners?.size || !me.size || !teams) return mine;
+  for (const [label, owner] of owners) {
+    const pickNo = labelToPickNo(label, teams);
+    if (!Number.isFinite(pickNo)) continue;
+    if (me.has(String(owner).trim().toLowerCase())) mine.add(pickNo);
+    else mine.delete(pickNo);
+  }
+  return mine;
+}
+
+/** The column whose header names this account, if the board says so. */
+export function slotOfUsername(headers, username) {
+  const me = namesOf(username);
+  if (!headers?.size || !me.size) return null;
+  for (const [slot, name] of headers) {
+    if (me.has(String(name).trim().toLowerCase())) return Number(slot);
+  }
+  return null;
 }

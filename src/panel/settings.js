@@ -58,31 +58,20 @@ export function renderSettings(container, ctx, cb) {
   const msg = el('div');
   const mapArea = el('div', { class: 'mapgrid' });
 
-  const slotSel = el('select', {
-    onchange: () => cb.onSettings({ slot: slotSel.value ? Number(slotSel.value) : null }),
-  });
-  slotSel.appendChild(el('option', { value: '', text: '—' }));
-  for (let i = 1; i <= (ctx.teams || 12); i++) {
-    const o = el('option', { value: String(i), text: String(i) });
-    if (ctx.settings.slot === i) o.selected = true;
-    slotSel.appendChild(o);
-  }
-
   box.appendChild(
     el('div', { class: 'btnrow' }, [
       el('button', { class: 'primary', text: 'Load list', onclick: doParse }),
       el('button', { class: 'ghost', text: 'Back to ranks', onclick: () => cb.onClose() }),
       el('span', { class: 'spacer' }),
-      el('label', { class: 'field' }, [
-        el('span', { text: 'Your slot' }),
-        slotSel,
-      ]),
     ])
   );
   box.appendChild(
     el('p', {
       class: 'pickinfo',
-      text: 'Your slot drives the dot at the top: green when you are on the clock, yellow 1–4 picks away, red beyond that.',
+      text:
+        'Your team is found from the Sleeper account signed in to this browser, and which picks are ' +
+        'yours is read off the board itself — so a pick you traded for counts as yours, and one you ' +
+        'traded away does not.',
     })
   );
 

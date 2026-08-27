@@ -6,9 +6,9 @@ import { buildIndex, pickLabel } from './lib/names.js';
 import { isExcludedPick } from './lib/parse.js';
 import { loadReference, enrichRows, renumber } from './lib/enrich.js';
 import { getDraftId, onUrlChange, DraftPoller } from './lib/draft.js';
-import { watchBoard, labelToPickNo, readOwnSlot } from './lib/board.js';
+import { watchBoard, labelToPickNo, readColumns, readHeaders, readOwners } from './lib/board.js';
 import { readSleeperUserId, fetchUserNames } from './lib/whoami.js';
-import { ownedPickNos } from './lib/turn.js';
+import { ownedPickNos, slotPickNos, applyBoardOwnership, slotOfUsername, usernameOnBoard } from './lib/turn.js';
 import { Panel } from './panel/panel.js';
 
 const LOG = '[DraftBuddy]';
@@ -31,12 +31,14 @@ let apiPicks = [];
 let stopBoard = null;
 let teams = null;
 
-// Who you are, and which picks are yours. Both are worked out without asking:
-// the slot comes from the draft's own draft_order, or failing that from your
-// name in the board header. See resolveSlot().
-let me = { userId: null, names: [] };
 let draftMeta = null;
-let autoSlot = null;
+// The names the signed-in Sleeper account answers to. This is how the panel
+// finds your team on the board — read once, never typed, never stored.
+let myNames = [];
+// Ownership read off the board: who sits above each column, and who drafts each
+// pick. This is the primary answer to "is it my turn" — see readOwners().
+let boardHeaders = new Map();
+let boardOwners = new Map();
 
 export async function boot() {
   if (booted) return;
@@ -70,7 +72,6 @@ async function createPanel() {
     onSettingsChange: (patch) =>
       store.patchSettings(patch).then(() => {
         if (patch.pollMs && poller) poller.setInterval(patch.pollMs);
-        if ('slot' in patch) panel.render(); // the dot depends on the slot
       }),
     onSaveRankings: (rows, mapping) => saveList(rows, mapping),
     onClearRankings: async () => {
@@ -91,7 +92,28 @@ async function createPanel() {
   panel.update({ rankings });
   window.addEventListener('resize', () => panel.applyGeometry());
   ensureReference().then(() => { if (rankings.length) reEnrich(); });
+  if (!rankings.length) seedIfEmpty();
+}
 
+/**
+ * A panel opening onto an empty board asks for a starting ranking.
+ *
+ * The install-time seed is the normal route; this is what covers an install
+ * that happened offline, or one whose first ADP pull failed. Seeding happens in
+ * the service worker rather than here so that two draft tabs opened at once
+ * cannot both write a list.
+ */
+async function seedIfEmpty() {
+  try {
+    const res = await api.runtime.sendMessage({ type: 'rankings:seed' });
+    if (!res?.seeded) return;
+    // Read it back through the same path an edit elsewhere takes, so there is
+    // one way rankings arrive in this module rather than two.
+    await reloadRankings();
+    console.info(`${LOG} seeded ${res.count} players in Sleeper ADP order`);
+  } catch (err) {
+    console.warn(`${LOG} could not seed a starting ranking: ${err.message}`);
+  }
 }
 
 /**
@@ -194,67 +216,109 @@ async function reEnrich() {
 }
 
 /**
- * The signed-in account. Read once: it cannot change without a page load, and
- * the name lookup is only needed for the DOM fallback.
+ * The signed-in Sleeper account.
+ *
+ * Read from sleeper.com's own storage, which a content script shares, then
+ * turned into the names the board's header row might show. Held in memory only:
+ * nothing is persisted, so it cannot go stale against a different login, and
+ * there is nothing for the user to fill in.
  */
 async function loadIdentity() {
   try {
     const userId = readSleeperUserId(window);
-    if (!userId) return;
-    me = { userId, names: await fetchUserNames(userId) };
-    console.info(`${LOG} signed in as ${me.names[0] || me.userId}`);
+    if (!userId) {
+      console.warn(`${LOG} not signed in to Sleeper — cannot tell which team is yours`);
+      return;
+    }
+    myNames = await fetchUserNames(userId);
+    console.info(`${LOG} signed in as ${myNames[0] || userId}`);
   } catch (err) {
     console.warn(`${LOG} could not identify the signed-in user: ${err.message}`);
   }
 }
 
 /**
- * Work out your draft slot without being told it.
+ * Read who owns what off the board.
  *
- * 1. draft_order maps your user id straight to a slot. Present for real
- *    leagues AND for league mocks, so it covers most drafts.
- * 2. Otherwise find your name in the board header and read off its column.
- *
- * An explicitly chosen slot always wins; this only fills the gap. Returns true
- * when the answer changed, so callers know whether to push it to the panel.
+ * Both boards name the acquiring team inside a traded pick's cell, so this is
+ * the one source that gets trades right without asking Sleeper's API — and the
+ * only one that works on a mock, where there is no draft order to look anyone
+ * up in.
  */
-function resolveSlot() {
-  const before = autoSlot;
-  const fromOrder = draftMeta?.draft_order?.[me.userId];
-  if (Number.isFinite(fromOrder)) autoSlot = fromOrder;
-  else if (me.names.length) {
-    autoSlot = readOwnSlot(document, me.names, { teams, type: draftMeta?.type || 'snake' }) ?? autoSlot;
+function readOwnership() {
+  try {
+    const type = draftMeta?.type || 'snake';
+    const columns = readColumns(document, { teams, type });
+    if (columns.length < 2) return false;
+    const headers = readHeaders(document, { teams, type, columns });
+    const owners = readOwners(document, { teams, type, columns, headers });
+
+    // Only report a change when one actually happened: this runs on every
+    // debounced board mutation, and re-rendering 300 rows for an unchanged
+    // answer would be the expensive half of doing it that often.
+    const before = ownershipKey();
+    boardHeaders = headers;
+    boardOwners = owners;
+    return ownershipKey() !== before;
+  } catch (err) {
+    console.warn(`${LOG} could not read pick ownership from the board: ${err.message}`);
+    return false;
   }
-  if (autoSlot !== before) {
-    console.info(`${LOG} your draft slot detected: ${autoSlot}`);
-  }
-  return autoSlot !== before;
 }
+
+const ownershipKey = () =>
+  `${[...boardHeaders].join('|')}#${[...boardOwners].join('|')}`;
 
 /**
- * The overall pick numbers you own, trades included. A traded pick is drafted
- * by someone who does not own the column it sits in, so "on the clock" has to
- * be answered from this set rather than from snake maths on your slot.
+ * The overall pick numbers you own, trades included.
+ *
+ * Built from two sources because neither is complete on its own:
+ *
+ *   Sleeper's traded_picks feed covers every round whether or not the pick has
+ *   been made, which is what the countdown needs — it looks forward. It is
+ *   empty for mock drafts.
+ *
+ *   The board is the truth for any cell actually on screen, works on mocks, and
+ *   needs no API at all. What it says about a pick nobody has made yet is not
+ *   something this code relies on.
+ *
+ * The feed lays the base; the board overrides it. Nothing is inferred: with no
+ * idea which team is yours, the answer is null and the panel says so.
  */
-function ownPicks(slot) {
-  if (!slot || !teams) return null;
+function ownPicks() {
+  if (!teams) return null;
+  const slot = slotOfUsername(boardHeaders, myNames);
   const rounds = draftMeta?.settings?.rounds || 15;
-  const slotToRoster = draftMeta?.slot_to_roster_id || null;
-  return ownedPickNos({
-    slot,
-    teams,
-    rounds,
-    type: draftMeta?.type || 'snake',
-    traded: draftMeta?.traded_picks || [],
-    slotToRoster,
-    rosterId: slotToRoster ? slotToRoster[slot] ?? slotToRoster[String(slot)] : null,
-  });
+  const type = draftMeta?.type || 'snake';
+
+  let base = null;
+  if (slot) {
+    const slotToRoster = draftMeta?.slot_to_roster_id || null;
+    base = slotToRoster
+      ? ownedPickNos({
+          slot, teams, rounds, type,
+          traded: draftMeta?.traded_picks || [],
+          slotToRoster,
+          rosterId: slotToRoster[slot] ?? slotToRoster[String(slot)],
+        })
+      : new Set(slotPickNos(slot, teams, rounds, type));
+  }
+  if (!base && !boardOwners.size) return null;
+
+  const mine = applyBoardOwnership(base, boardOwners, myNames, teams);
+  return mine.size ? mine : null;
 }
 
-/** Push the current slot answer and pick ownership into the panel. */
+/** Push the board's answer about your picks into the panel. */
 function pushOwnership() {
-  const slot = panel.settings.slot || autoSlot;
-  panel.update({ autoSlot, ownPicks: ownPicks(slot) });
+  panel.update({
+    ownPicks: ownPicks(),
+    myNames,
+    boardNames: [...boardHeaders.values()],
+    // null while there is no board to check against, so "not found" only ever
+    // means the board was read and the account genuinely was not on it.
+    usernameFound: !myNames.length || !boardHeaders.size ? null : usernameOnBoard(boardHeaders, myNames),
+  });
 }
 
 async function attach(id) {
@@ -266,8 +330,9 @@ async function attach(id) {
   apiPicks = [];
   boardClockLabel = null;
   draftMeta = null;
-  autoSlot = null;
-  panel.update({ autoSlot: null, ownPicks: null });
+  boardHeaders = new Map();
+  boardOwners = new Map();
+  panel.update({ ownPicks: null, boardNames: [], usernameFound: null });
   manualIds = new Set(await store.getManualDrafted(draftId));
   panel.update({ manualIds: new Set(manualIds), draftedIds: new Set(), unmatched: [], pickNo: null });
   console.info(`${LOG} tracking draft ${draftId}`);
@@ -277,7 +342,6 @@ async function attach(id) {
       draftMeta = draft || null;
       teams = draft?.settings?.teams ?? null;
       panel.update({ teams, type: draft?.type || 'snake' });
-      resolveSlot();
       pushOwnership();
     },
     onPicks: (picks) => { apiPicks = picks || []; mergePicks(); },
@@ -288,16 +352,21 @@ async function attach(id) {
   });
   await poller.start(panel.settings.pollMs);
 
-  stopBoard = watchBoard(({ adapter, picks, clockLabel }) => {
-    boardPicks = picks || [];
-    boardClockLabel = clockLabel;
-    if (adapter) panel.update({ boardKind: adapter.id });
-    // The board renders after the meta arrives, so the DOM route only becomes
-    // available here — and the columns move as the grid scrolls or resizes.
-    if (autoSlot === null) resolveSlot();
-    pushOwnership();
-    mergePicks();
-  });
+  stopBoard = watchBoard(
+    ({ adapter, picks, clockLabel }) => {
+      boardPicks = picks || [];
+      boardClockLabel = clockLabel;
+      if (adapter) panel.update({ boardKind: adapter.id });
+      readOwnership();
+      pushOwnership();
+      mergePicks();
+    },
+    {
+      // A trade re-badges a cell without adding a pick, so ownership is re-read
+      // on every board change rather than only when somebody drafts.
+      onScan: () => { if (readOwnership()) pushOwnership(); },
+    }
+  );
 }
 
 /** Whichever source knows about more picks drives the panel. */

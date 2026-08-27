@@ -8,8 +8,8 @@
 // Assigning to an undeclared binding inside an ES module throws a ReferenceError
 // only when that line runs, so no amount of importing catches it. It has to be
 // read out of the source.
-import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -83,6 +83,28 @@ ok(/DraftPoller/.test(main) && /watchBoard/.test(main), 'and still starts both p
 // all — nothing on the panel says so.
 const popup = readFileSync(join(ROOT, 'src/popup/popup.html'), 'utf8');
 ok(/Drag players to rank/i.test(popup), 'the popup tells you players can be dragged to rank');
+
+// 4. Your team is detected, never typed.
+//    The panel finds you from the Sleeper account signed in to the browser.
+//    There is deliberately no entry box anywhere: a field that duplicates
+//    something the browser already knows is a question not worth asking, and an
+//    earlier build shipped both, which is how a stale typed name silently
+//    tracked the wrong team.
+const panelSrc = readFileSync(join(ROOT, 'src/panel/panel.js'), 'utf8');
+const settingsSrc = readFileSync(join(ROOT, 'src/panel/settings.js'), 'utf8');
+const storeSrc = readFileSync(join(ROOT, 'src/lib/store.js'), 'utf8');
+const mainSrc = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
+
+ok(!/nameinput|renderUsernamePrompt/.test(panelSrc), 'the panel has no username entry box');
+ok(!/username/i.test(settingsSrc) || !/input/.test(settingsSrc.split('username')[0].slice(-200)),
+   'settings has no username field');
+ok(!/username:/.test(storeSrc), 'and no username is persisted to settings');
+ok(/readSleeperUserId/.test(mainSrc) && /fetchUserNames/.test(mainSrc),
+   'the account is read from the browser instead');
+ok(existsSync(join(ROOT, 'src/lib/whoami.js')), 'the module that does it is present');
+
+// The slot is still never inferred — that was a separate assumption.
+ok(!/autoSlot|resolveSlot|readOwnSlot/.test(mainSrc), 'no draft slot is inferred');
 
 console.log(fails ? `\n${fails} check(s) failed` : '\nWiring is intact');
 process.exit(fails ? 1 : 0);

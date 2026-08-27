@@ -17,6 +17,10 @@
       "32": "icons/icon32.png"
     }
   },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
   "permissions": [
     "storage"
   ],
