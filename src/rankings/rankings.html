@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>My Rankings — Draft Buddy</title>
+<link rel="stylesheet" href="rankings.css">
+<div class="bar">
+  <strong class="brand">MY RANKINGS</strong>
+  <input id="search" class="search" placeholder="Find a player" autocomplete="off" spellcheck="false">
+  <div class="group" id="filters"></div>
+  <div class="group">
+    <button id="sortmine" class="on">MY RANK</button>
+    <button id="sortadp">ADP</button>
+  </div>
+  <span class="spacer"></span>
+  <button id="update">Update ADP</button>
+  <button id="export">Export list</button>
+  <button id="import">Import…</button>
+  <input id="file" type="file" accept=".txt,.csv" hidden>
+</div>
+
+<div class="status">
+  <span id="count"></span>
+  <span id="hint" class="warn"></span>
+  <span id="note" class="note"></span>
+</div>
+
+<div class="head">
+  <span class="rank">#</span>
+  <span class="pos">POS</span>
+  <span class="name">PLAYER</span>
+  <span class="team">TEAM</span>
+  <span class="bye">BYE</span>
+  <span class="adp">ADP</span>
+</div>
+
+<div id="list" class="list"></div>
+<p id="empty" class="empty" hidden></p>
+
+<script type="module" src="rankings.js"></script>

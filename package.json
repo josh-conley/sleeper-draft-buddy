@@ -1,17 +1,19 @@
 {
   "name": "sleeper-draft-buddy",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
-  "description": "Chrome extension: paste a plain list of player names, get a live draft overlay on either Sleeper draft board.",
+  "description": "Chrome extension: rank players from live ADP, then get a draft overlay that crosses them off as they are drafted on either Sleeper board.",
   "scripts": {
-    "test": "node test/board.test.mjs && node test/ambiguity.test.mjs && node test/enrich.test.mjs && node test/render.test.mjs",
+    "test": "node test/wiring.test.mjs && node test/board.test.mjs && node test/onclock.test.mjs && node test/adp.test.mjs && node test/seed.test.mjs && node test/ambiguity.test.mjs && node test/enrich.test.mjs && node test/value.test.mjs && node test/render.test.mjs && node test/rows.test.mjs && node test/rankings.test.mjs && node test/ext.test.mjs",
     "test:live": "node test/live-enrich.mjs",
     "icons": "node tools/make-icons.mjs",
     "build": "node tools/build.mjs",
     "test:package": "npm run build && node test/package.test.mjs",
     "build:store": "node tools/build.mjs --store",
-    "shot": "node tools/crop-shot.mjs"
+    "shot": "node tools/crop-shot.mjs",
+    "shot:rankings": "node tools/shot-rankings.mjs",
+    "build:firefox": "node tools/build.mjs --firefox"
   },
   "devDependencies": {
     "jsdom": "^26.0.0"

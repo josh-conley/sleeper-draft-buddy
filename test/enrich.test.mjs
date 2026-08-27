@@ -84,7 +84,9 @@ ok(clockState(null).id === 'unknown', 'dot: unknown when picks-away is unknown')
 ok(clockState(0, false).id === 'unknown', 'dot: disconnected never shows a confident colour');
 ok(/on the clock/i.test(clockTooltip(0)), 'tooltip for on the clock');
 ok(/3 picks/.test(clockTooltip(3)), 'tooltip counts picks');
-ok(/slot/i.test(clockTooltip(3, true, false)), 'tooltip asks for a slot when unset');
+// Nothing is inferred: with no username the dot says so rather than counting
+// down to a turn it cannot know is yours.
+ok(/username/i.test(clockTooltip(3, true, false)), 'tooltip asks for the username when nothing is known');
 
 console.log(fails ? `\n${fails} failing check(s)` : '\nAll enrichment checks passed');
 process.exit(fails ? 1 : 0);

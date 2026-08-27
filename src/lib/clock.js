@@ -22,10 +22,13 @@ export function clockState(picksAway, connected = true) {
   return CLOCK_STATES.far;
 }
 
-/** Text for the dot's tooltip. */
-export function clockTooltip(picksAway, connected = true, slotSet = true) {
+/**
+ * Text for the dot's tooltip.
+ * @param {boolean} known  whether the panel knows which picks are yours
+ */
+export function clockTooltip(picksAway, connected = true, known = true) {
   if (!connected) return 'No live draft data — the dot cannot tell you whose turn it is';
-  if (!slotSet) return 'Set your draft slot in settings to track your turn';
+  if (!known) return 'Enter your Sleeper username so the board can tell you when it is your turn';
   if (picksAway === null || picksAway === undefined) return 'Waiting for the draft to start';
   if (picksAway <= 0) return 'You are on the clock';
   return `${picksAway} pick${picksAway === 1 ? '' : 's'} until your turn`;

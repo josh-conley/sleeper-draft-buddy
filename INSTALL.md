@@ -1,7 +1,11 @@
 # Sleeper Draft Buddy — Install
 
-A Chrome extension that puts your own player rankings on top of the Sleeper
-draft board and crosses players off automatically as they get drafted.
+A Chrome extension that lets you rank players, then puts that ranking on top of
+the Sleeper draft board and crosses players off automatically as they get
+drafted.
+
+> Installing from the Chrome Web Store? None of this applies — click Add to
+> Chrome and skip to "Using it". These steps are for a zip sent to you directly.
 
 Takes about two minutes. You only do this once.
 
@@ -10,7 +14,7 @@ Takes about two minutes. You only do this once.
 ## 1. Unzip
 
 Unzip the file you were sent. You'll get a folder called something like
-`sleeper-draft-buddy-v1.0.0`.
+`sleeper-draft-buddy-v1.1.0`.
 
 **Put it somewhere permanent** — Documents is fine. Chrome loads it from wherever
 you leave it, so if you delete or move the folder later, the extension stops
@@ -22,7 +26,7 @@ working. Don't leave it in Downloads.
    (type it in the address bar — it won't come up in a search)
 2. Turn on **Developer mode**, top-right corner
 3. Click **Load unpacked**, top-left
-4. Select the `sleeper-draft-buddy-v1.0.0` folder — the one with
+4. Select the `sleeper-draft-buddy-v1.1.0` folder — the one with
    `manifest.json` inside it — and click Select
 
 You should see "Sleeper Draft Buddy" appear in the list.
@@ -71,15 +75,27 @@ Click **Load list**. That's it — you don't need a spreadsheet.
 Defenses and kickers are ignored on purpose.
 </details>
 
-## 5. Set your draft slot
+## 5. Nothing to set
 
-In the panel's toolbar there's a **Slot** dropdown, highlighted in orange until
-you set it. Pick the position you're drafting from (1 = first pick).
+The panel finds your team on its own, from the Sleeper account you're signed in
+with in this browser. It reads the board's header row for your username, then
+works out which picks are yours — including any you traded for, and excluding
+any you traded away.
 
-This turns on the dot at the top-left of the panel:
+That drives the dot at the top-left of the panel:
 
 | | |
 |---|---|
+| 🟢 **green, pulsing** | you're on the clock |
+| 🟡 **yellow** | 1–4 picks away |
+| 🔴 **red** | 5+ picks away |
+| ⚪ **grey** | no draft data, or it can't tell which team is yours |
+
+If it can't tell, it says so in a bar across the top of the panel: either you're
+not signed in to Sleeper in this browser, or the account you're signed in as
+isn't playing in this draft.
+
+---|---|
 | 🟢 **green, pulsing** | you're on the clock |
 | 🟡 **yellow** | 1–4 picks away |
 | 🔴 **red** | 5+ picks away |

@@ -1,8 +1,12 @@
 # Sleeper Draft Buddy
 
-Paste a plain list of player names. Get a live, sortable, position-filterable
-draft board overlay that checks players off automatically as they're drafted —
-on **either** Sleeper draft board.
+Build your player rankings, seeded from live Sleeper ADP and dragged into the
+order you actually believe. Then get a live, sortable, position-filterable draft
+overlay that checks players off automatically as they're drafted — on **either**
+Sleeper draft board.
+
+Rank on the **My Rankings** page, or paste a plain list of names into the panel.
+Both end up in the same place.
 
 You don't need a spreadsheet. Draft Buddy infers position, team, bye week and
 positional rank from the names alone.
@@ -153,3 +157,77 @@ inside the package, and that nothing developer-only leaked in.
 `src/lib/` — `parse` (ingest), `enrich` (inference), `names` (matching),
 `board` (both boards), `draft` (API + snake math), `clock` (the dot),
 `value` (bands), `store`.
+
+`src/sw.js` — the service worker, and the only part that talks to the desktop
+app. It holds the WebSocket rather than the panel doing it: a content script's
+network calls answer to sleeper.com's CSP, and socket activity is what keeps an
+MV3 worker alive through a draft.
+
+## Firefox
+
+One codebase, two packages.
+
+```sh
+npm run build          # side-load zip
+npm run build:store    # Chrome Web Store
+npm run build:firefox  # AMO
+```
+
+`src/lib/ext.js` is the whole port. Chrome exposes `chrome`; Firefox exposes
+both, but only `browser` returns promises — reach for `chrome` there and every
+`await` resolves to `undefined`, so a list comes back empty rather than
+erroring. Everything goes through `api` from that module, and
+`test/ext.test.mjs` fails the build if any file reaches past it.
+
+The two classic scripts (`content.js`, `popup.js`) cannot import, so they repeat
+the one line inline.
+
+The Firefox package gets `browser_specific_settings` stamped in at build time
+rather than committed — Chrome warns about the key, and neither store's package
+should carry the other's metadata. It declares
+`data_collection_permissions: { required: ['none'] }`, which AMO requires and
+which is simply true here.
+
+`npx web-ext lint` on the built folder reports **0 errors**. The one remaining
+warning is `UNSAFE_VAR_ASSIGNMENT` on `content.js` — the dynamic
+`import(runtime.getURL('src/main.js'))` that loads real ES modules out of a
+classic content script. Neither browser supports module content scripts in MV3,
+the argument is an extension URL and not user input, and there is no way to
+write this loader without it. Worth mentioning in the AMO review notes.
+
+**Untested in a real Firefox.** The jsdom suite proves the namespace swap; the
+things it cannot see are how Firefox's optional-by-default host permissions
+behave on first run, and the panel inside its shadow root.
+
+## My Rankings
+
+`src/rankings/` is a full-tab extension page — the board where your order gets
+made, outside of any draft. Open it from the popup, or from the panel's ⚙.
+
+- **Seeded from live Sleeper ADP — Sleeper's own.** `/projections/nfl/{season}`
+  carries the ADP fields Sleeper's draft board itself displays, `adp_half_ppr`
+  among them, keyed by the same player ids used everywhere else here. So the
+  ADP column matches what you see on the board by construction rather than by
+  resemblance, and it arrives in one request with no id translation step.
+  Read the header of `src/lib/adp.js` before touching it: the endpoint is
+  undocumented, and the client is written so that a failure costs freshness and
+  nothing else.
+- **Drag to reorder.** Array order is the ranking; a drop rewrites
+  `chrome.storage` immediately and renumbers `myRank`.
+- **Sort by ADP** to see the market's order. That is a view: your saved order is
+  untouched, and dragging turns off while it is on so you cannot reorder a list
+  you are not really looking at.
+- **Update ADP** on the button, and automatically when the page opens with a
+  cached board more than 12 hours old.
+- **Import** a .txt or .csv, **Export** your order as newline-separated names.
+
+An update never disturbs what you ranked: a player already on the board keeps his
+slot and takes the new ADP, one who has left the feed stays put, and a newcomer
+lands at the bottom. Appended rows get fresh ids — reusing one would quietly move
+a mid-draft "drafted" mark onto another player.
+
+**Everything writes rows through `buildRows`**, never around it. That is what
+assigns the `id` every lookup in `names.js` is keyed by; rows made by hand index
+to `undefined` and silently match no picks at all. `test/rows.test.mjs` holds
+that line.
+
