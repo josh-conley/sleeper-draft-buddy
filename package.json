@@ -1,6 +1,6 @@
 {
   "name": "sleeper-draft-buddy",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "description": "Chrome extension: rank players from live ADP, then get a draft overlay that crosses them off as they are drafted on either Sleeper board.",
