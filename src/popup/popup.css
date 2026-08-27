@@ -21,3 +21,16 @@ body { margin: 0; background: var(--bg); color: var(--text);
 .btn { width: 100%; padding: 8px; border: none; border-radius: 7px; cursor: pointer;
   background: #4fd1c5; color: #0b1114; font: inherit; font-weight: 700; }
 .btn:hover { filter: brightness(1.08); }
+
+.btn + .btn { margin-top: 8px; }
+.btn.ghost { background: transparent; color: var(--dim); border: 1px solid var(--line); font-weight: 500; }
+.btn.ghost:hover { color: var(--text); }
+
+.noterow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.noterow .note { margin-bottom: 12px; }
+.link {
+  padding: 0; border: none; background: none; cursor: pointer;
+  color: #4fd1c5; font: inherit; font-size: 11px;
+}
+.link:hover { text-decoration: underline; }
+.link:disabled { color: var(--dim); cursor: default; text-decoration: none; }

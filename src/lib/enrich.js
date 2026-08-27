@@ -10,6 +10,7 @@
 //
 // Any column actually present in the CSV wins over the inferred value.
 
+import { api } from './ext.js';
 import { normalize } from './names.js';
 import { EXCLUDED_POSITIONS } from './parse.js';
 
@@ -73,17 +74,17 @@ export async function getCurrentSeason() {
 }
 
 /**
- * Load the reference data, using chrome.storage as a day-long cache.
+ * Load the reference data, using api.storage as a day-long cache.
  * `force` refetches even if the cache is warm.
  */
 export async function loadReference({ force = false } = {}) {
-  const cached = (await chrome.storage.local.get(CACHE_KEY))[CACHE_KEY];
+  const cached = (await api.storage.local.get(CACHE_KEY))[CACHE_KEY];
   if (!force && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached;
 
   const season = await getCurrentSeason();
   const [players, byes] = await Promise.all([fetchPlayerIndex(), fetchByeWeeks(season)]);
   const payload = { at: Date.now(), season, players, byes };
-  await chrome.storage.local.set({ [CACHE_KEY]: payload });
+  await api.storage.local.set({ [CACHE_KEY]: payload });
   return payload;
 }
 
@@ -110,6 +111,22 @@ export function buildPlayerLookup(players) {
  */
 /** "JAX DST", "Ravens D/ST", "SF DEF" — recognisable even when unresolved. */
 const DEF_NAME_RE = /\b(d\/?st|def|defense)\b/i;
+
+/**
+ * Re-derive the rank fields from the order the rows are in. Needed after any
+ * reorder: enrichRows only fills posRank when it is missing, so without this a
+ * dragged player keeps the positional rank he had three moves ago.
+ */
+export function renumber(rows) {
+  const seen = new Map();
+  return rows.map((r, i) => {
+    const position = String(r.position || '').toUpperCase();
+    if (!position) return { ...r, myRank: i + 1 };
+    const n = (seen.get(position) || 0) + 1;
+    seen.set(position, n);
+    return { ...r, myRank: i + 1, posRank: `${position}${n}` };
+  });
+}
 
 export function enrichRows(rows, reference) {
   const { byName, byLast } = buildPlayerLookup(reference.players);

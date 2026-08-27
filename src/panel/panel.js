@@ -4,7 +4,20 @@ import { FIELDS } from '../lib/parse.js';
 import { bandFor } from '../lib/value.js';
 import { formatPick, picksUntilTurn } from '../lib/draft.js';
 import { clockState, clockTooltip } from '../lib/clock.js';
+import { picksUntilOwnedTurn } from '../lib/turn.js';
 import { renderSettings } from './settings.js';
+
+/**
+ * What the table shows, in this order.
+ *
+ * Deliberately not FIELDS: that is the ingest contract, and a pasted CSV may
+ * well carry a Pos column. This is the display, where "RB1" already says the
+ * position, so a separate Pos column is just the same fact twice. The ranking
+ * page shows these same columns in this same order.
+ */
+export const COLUMNS = ['myRank', 'posRank', 'name', 'team', 'bye'];
+
+const fieldFor = (key) => FIELDS.find((f) => f.key === key);
 
 // Position filter chips. `test` gets the row's uppercased position.
 export const FILTERS = [
@@ -47,6 +60,10 @@ export class Panel {
       status: 'stale',
       source: null,
       picksAway: null,
+      // Slot worked out from the draft itself, and the exact pick numbers you
+      // own once trades are applied. Both arrive from main.js.
+      autoSlot: null,
+      ownPicks: null,
       reference: null,
       view: 'ranks',
       showUnmatched: false,
@@ -326,25 +343,62 @@ export class Panel {
    */
   renderDot() {
     const connected = this.state.status === 'live' && Number.isFinite(this.state.pickNo);
-    const slotSet = !!this.settings.slot;
-    const away = slotSet ? this.state.picksAway : null;
+    const source = this.slotSource();
+    const away = source ? this.state.picksAway : null;
     this.dot.dataset.state = clockState(away, connected).id;
-    this.dot.title = clockTooltip(away, connected, slotSet);
+    this.dot.title = clockTooltip(away, connected, source);
   }
 
+  /**
+   * Your slot, and how we came by it. A slot you chose yourself always wins —
+   * detection fills the gap rather than overriding you, so a wrong guess is
+   * always correctable and never silently sticks.
+   * @returns {'user'|'auto'|null}
+   */
+  slotSource() {
+    if (this.settings.slot) return 'user';
+    return this.state.autoSlot ? 'auto' : null;
+  }
+
+  effectiveSlot() {
+    return this.settings.slot || this.state.autoSlot || null;
+  }
+
+  /**
+   * The pick number of your next turn — what a "can I wait?" question is really
+   * asked against. Null until a slot is set, because without one there is no
+   * next turn and a colour would be a guess.
+   */
+  nextPickNo() {
+    const { pickNo } = this.state;
+    const away = this.computePicksAway();
+    if (!Number.isFinite(pickNo) || !Number.isFinite(away)) return null;
+    return pickNo + away;
+  }
+
+  /**
+   * Distance to your next turn. Prefers the explicit set of picks you own,
+   * which is the only thing that stays right when a pick has been traded;
+   * snake arithmetic is the fallback for drafts with no ownership data.
+   */
   computePicksAway() {
-    const { pickNo, teams, type } = this.state;
+    const { pickNo, teams, type, ownPicks } = this.state;
     if (!Number.isFinite(pickNo)) return null;
-    return picksUntilTurn(pickNo, teams, this.settings.slot, type);
+    const slot = this.effectiveSlot();
+    if (ownPicks?.size) return picksUntilOwnedTurn(pickNo, ownPicks);
+    return picksUntilTurn(pickNo, teams, slot, type);
   }
 
   /** Slot picker in the toolbar; highlighted until it is actually set. */
   renderSlotPicker() {
     const teams = this.state.teams || 12;
-    const want = `${teams}|${this.settings.slot ?? ''}`;
+    const auto = this.state.autoSlot;
+    const want = `${teams}|${this.settings.slot ?? ''}|${auto ?? ''}`;
     if (this.slotSel.dataset.built !== want) {
       this.slotSel.textContent = '';
-      this.slotSel.appendChild(el('option', { value: '', text: 'set…' }));
+      // The empty option doubles as the readout for a detected slot, so the
+      // picker shows what is actually in force without pretending you set it.
+      this.slotSel.appendChild(el('option', { value: '', text: auto ? `auto ${auto}` : 'set…' }));
       for (let i = 1; i <= teams; i++) {
         const o = el('option', { value: String(i), text: String(i) });
         if (this.settings.slot === i) o.selected = true;
@@ -353,10 +407,14 @@ export class Panel {
       this.slotSel.dataset.built = want;
     }
     const unset = !this.settings.slot;
-    this.slotWrap.classList.toggle('needed', unset);
-    this.slotWrap.title = unset
-      ? 'Pick your draft slot to turn on the on-the-clock dot and the countdown'
-      : `Drafting from slot ${this.settings.slot}`;
+    // Only nag when nothing at all is known — a detected slot is a working slot.
+    this.slotWrap.classList.toggle('needed', unset && !auto);
+    this.slotWrap.classList.toggle('auto', unset && !!auto);
+    this.slotWrap.title = !unset
+      ? `Drafting from slot ${this.settings.slot}`
+      : auto
+        ? `Slot ${auto}, detected from the draft. Choose one here to override it.`
+        : 'Pick your draft slot to turn on the on-the-clock dot and the countdown';
   }
 
   renderHeaderInfo() {
@@ -366,11 +424,27 @@ export class Panel {
       return;
     }
     this.pickInfo.textContent = '';
-    this.pickInfo.append(el('span', { text: 'On the clock ' }), el('b', { text: formatPick(pickNo, teams) }));
+    this.pickInfo.append(
+      el('span', { text: 'On the clock ' }),
+      el('b', { text: formatPick(pickNo, teams) }),
+      // The overall number as well as the round.pick: "2.09" places you in the
+      // round, but every ADP on screen is an overall pick number.
+      el('span', { class: 'overall', text: ` #${pickNo}`, title: `Overall pick ${pickNo}` })
+    );
     const until = this.state.picksAway;
     if (until !== null) {
       this.pickInfo.append(
         el('span', { text: until === 0 ? ' · you are up' : ` · ${until} until you` })
+      );
+    }
+    const next = this.nextPickNo();
+    if (Number.isFinite(next)) {
+      this.pickInfo.append(
+        el('span', {
+          class: 'overall',
+          text: ` · next #${next}`,
+          title: `Your next pick is overall pick ${next} — what the ADP column is coloured against`,
+        })
       );
     }
     if (this.state.source) {
@@ -396,7 +470,7 @@ export class Panel {
 
   sortRows(rows) {
     const { sortKey, sortDir } = this.settings;
-    const field = FIELDS.find((f) => f.key === sortKey) || FIELDS[0];
+    const field = fieldFor(sortKey) || FIELDS[0];
     const dir = sortDir === 'desc' ? -1 : 1;
     return rows.slice().sort((a, b) => {
       const av = a[field.key];
@@ -419,6 +493,51 @@ export class Panel {
     if (sortKey !== key) return this.patch({ sortKey: key, sortDir: 'asc' });
     if (sortDir === 'asc') return this.patch({ sortDir: 'desc' });
     return this.patch({ sortKey: 'myRank', sortDir: 'asc' }); // third click clears
+  }
+
+  /**
+   * Drag to reorder, delegated on the tbody. The move is applied by the two
+   * players' positions in the full list, so it stays a valid reordering however
+   * filtered the view is — which matters most mid-draft, when the board is
+   * usually filtered to one position.
+   */
+  bindDrag(tbody) {
+    let dragId = null;
+
+    tbody.addEventListener('dragstart', (e) => {
+      const tr = e.target.closest('tr');
+      if (!tr?.dataset.id) return;
+      dragId = tr.dataset.id;
+      tr.classList.add('dragging');
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+    });
+
+    tbody.addEventListener('dragover', (e) => {
+      if (!dragId) return;
+      e.preventDefault();
+      const tr = e.target.closest('tr');
+      tbody.querySelectorAll('tr.over').forEach((n) => n.classList.remove('over'));
+      if (tr?.dataset.id && tr.dataset.id !== dragId) tr.classList.add('over');
+    });
+
+    tbody.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const tr = e.target.closest('tr');
+      const target = tr?.dataset.id;
+      if (dragId && target && target !== dragId) {
+        this.justDragged = true;
+        this.cb.onReorder?.(dragId, target);
+        // Cleared on a timer because the click that follows a drag arrives
+        // after it, and only a real click should strike a player off.
+        setTimeout(() => { this.justDragged = false; }, 250);
+      }
+      dragId = null;
+    });
+
+    tbody.addEventListener('dragend', () => {
+      dragId = null;
+      tbody.querySelectorAll('tr.dragging, tr.over').forEach((n) => n.classList.remove('dragging', 'over'));
+    });
   }
 
   renderTable() {
@@ -445,9 +564,11 @@ export class Panel {
     const draftedCount = new Set([...this.state.draftedIds, ...this.state.manualIds]).size;
     this.countEl.textContent = `${rows.length} shown · ${draftedCount} drafted`;
 
+    const columns = COLUMNS.map(fieldFor).filter(Boolean);
+
     const thead = el('thead');
     const hr = el('tr');
-    FIELDS.forEach((f) => {
+    columns.forEach((f) => {
       const active = this.settings.sortKey === f.key;
       const th = el('th', {
         'aria-sort': active ? (this.settings.sortDir === 'asc' ? 'ascending' : 'descending') : 'none',
@@ -464,18 +585,31 @@ export class Panel {
 
     const tbody = el('tbody');
     const pickNo = this.state.pickNo;
+
+    // Reordering is only meaningful while the screen is showing the order being
+    // rewritten. Under any other sort the rows on screen are not the list.
+    const canDrag = this.settings.sortKey === 'myRank' && this.settings.sortDir === 'asc';
+
     rows.forEach((r) => {
       const auto = this.state.draftedIds.has(r.id);
       const manual = this.state.manualIds.has(r.id);
       const tr = el('tr', {
-        class: auto ? 'drafted' : manual ? 'manual' : '',
-        title: manual ? 'Manually struck — click to restore' : 'Click to strike manually',
-        onclick: () => this.cb.onToggleManual(r.id),
+        class: `${auto ? 'drafted' : manual ? 'manual' : ''}${canDrag ? ' draggable' : ''}`,
+        title: canDrag
+          ? 'Drag to reorder · click to strike manually'
+          : manual ? 'Manually struck — click to restore' : 'Click to strike manually',
+        // A drag ends with a click in some browsers; without this guard,
+        // reordering a player would also strike him off the board.
+        onclick: () => { if (!this.justDragged) this.cb.onToggleManual?.(r.id); },
       });
+      if (canDrag) {
+        tr.draggable = true;
+        tr.dataset.id = r.id;
+      }
 
       const band = bandFor(r.myRank, pickNo);
 
-      FIELDS.forEach((f) => {
+      columns.forEach((f) => {
         if (f.key === 'myRank') {
           const badge = el('span', {
             class: 'rankbadge',
@@ -486,9 +620,12 @@ export class Panel {
           tr.appendChild(el('td', {}, [badge]));
           return;
         }
-        if (f.key === 'position') {
+        if (f.key === 'posRank') {
+          // Coloured by position, which is what the dropped Pos column was for.
           tr.appendChild(
-            el('td', {}, [el('span', { class: 'pos', 'data-pos': r.position || null, text: r.position ?? '' })])
+            el('td', {}, [
+              el('span', { class: 'pos', 'data-pos': r.position || null, text: r.posRank ?? '' }),
+            ])
           );
           return;
         }
@@ -515,6 +652,7 @@ export class Panel {
       );
       return;
     }
+    this.bindDrag(tbody);
     this.body.appendChild(el('table', {}, [thead, tbody]));
   }
 }

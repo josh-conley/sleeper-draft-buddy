@@ -1,11 +1,14 @@
 // Entry point: detect the draft, boot the panel, keep it in sync.
 
+import { api } from './lib/ext.js';
 import * as store from './lib/store.js';
 import { buildIndex, pickLabel } from './lib/names.js';
 import { isExcludedPick } from './lib/parse.js';
-import { loadReference, enrichRows } from './lib/enrich.js';
+import { loadReference, enrichRows, renumber } from './lib/enrich.js';
 import { getDraftId, onUrlChange, DraftPoller } from './lib/draft.js';
-import { watchBoard, labelToPickNo } from './lib/board.js';
+import { watchBoard, labelToPickNo, readOwnSlot } from './lib/board.js';
+import { readSleeperUserId, fetchUserNames } from './lib/whoami.js';
+import { ownedPickNos } from './lib/turn.js';
 import { Panel } from './panel/panel.js';
 
 const LOG = '[DraftBuddy]';
@@ -28,9 +31,17 @@ let apiPicks = [];
 let stopBoard = null;
 let teams = null;
 
+// Who you are, and which picks are yours. Both are worked out without asking:
+// the slot comes from the draft's own draft_order, or failing that from your
+// name in the board header. See resolveSlot().
+let me = { userId: null, names: [] };
+let draftMeta = null;
+let autoSlot = null;
+
 export async function boot() {
   if (booted) return;
   booted = true;
+  await loadIdentity();
   onUrlChange(() => onRoute());
   await onRoute();
 }
@@ -50,7 +61,7 @@ async function onRoute() {
 }
 
 async function createPanel() {
-  const cssText = await fetch(chrome.runtime.getURL('src/panel/panel.css')).then((r) => r.text());
+  const cssText = await fetch(api.runtime.getURL('src/panel/panel.css')).then((r) => r.text());
   const settings = await store.getSettings();
   rankings = (await store.get(store.KEYS.rankings)) || [];
   index = buildIndex(rankings);
@@ -74,14 +85,65 @@ async function createPanel() {
       panel.update({ manualIds: new Set(manualIds) });
     },
     onRefreshReference: () => ensureReference({ force: true }).then(() => reEnrich()),
+    onReorder: (fromId, toId) => reorder(fromId, toId),
   });
 
   panel.update({ rankings });
   window.addEventListener('resize', () => panel.applyGeometry());
   ensureReference().then(() => { if (rankings.length) reEnrich(); });
+
 }
 
-/** Player database + bye weeks, cached for a day in chrome.storage. */
+/**
+ * Move one player to another's slot. Applied to the full list by their two
+ * positions in it, so it is a valid reordering however filtered the view is —
+ * which is the normal case mid-draft.
+ */
+async function reorder(fromId, toId) {
+  const from = rankings.findIndex((r) => r.id === fromId);
+  const to = rankings.findIndex((r) => r.id === toId);
+  if (from === -1 || to === -1 || from === to) return;
+
+  const next = [...rankings];
+  next.splice(to, 0, next.splice(from, 1)[0]);
+  rankings = renumber(next);
+  index = buildIndex(rankings);
+  await store.set(store.KEYS.rankings, rankings);
+  panel.update({ rankings });
+  mergePicks();
+}
+
+/** Two lists are the same board if the same players sit in the same order. */
+const sameOrder = (a, b) =>
+  a.length === b.length && a.every((r, i) => r.id === b[i].id && r.name === b[i].name);
+
+/**
+ * Pick up rankings edited elsewhere — the My Rankings tab, or another draft
+ * window. Compared rather than timed: this fires for our own writes too, and a
+ * reload on those would fight the user mid-drag.
+ */
+async function reloadRankings() {
+  const stored = (await store.get(store.KEYS.rankings)) || [];
+  if (sameOrder(stored, rankings)) return false;
+  rankings = stored;
+  index = buildIndex(rankings);
+  panel.update({ rankings });
+  mergePicks();
+  console.log(`${LOG} rankings reloaded — ${rankings.length} players`);
+  return true;
+}
+
+api.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes[store.KEYS.rankings] && panel) reloadRankings();
+});
+
+api.runtime.onMessage.addListener((msg, _sender, respond) => {
+  if (msg?.type !== 'rankings:reload') return false;
+  reloadRankings().then((changed) => respond({ ok: true, changed, count: rankings.length }));
+  return true;
+});
+
+/** Player database + bye weeks, cached for a day in api.storage. */
 async function ensureReference(opts) {
   try {
     reference = await loadReference(opts);
@@ -131,6 +193,70 @@ async function reEnrich() {
   mergePicks();
 }
 
+/**
+ * The signed-in account. Read once: it cannot change without a page load, and
+ * the name lookup is only needed for the DOM fallback.
+ */
+async function loadIdentity() {
+  try {
+    const userId = readSleeperUserId(window);
+    if (!userId) return;
+    me = { userId, names: await fetchUserNames(userId) };
+    console.info(`${LOG} signed in as ${me.names[0] || me.userId}`);
+  } catch (err) {
+    console.warn(`${LOG} could not identify the signed-in user: ${err.message}`);
+  }
+}
+
+/**
+ * Work out your draft slot without being told it.
+ *
+ * 1. draft_order maps your user id straight to a slot. Present for real
+ *    leagues AND for league mocks, so it covers most drafts.
+ * 2. Otherwise find your name in the board header and read off its column.
+ *
+ * An explicitly chosen slot always wins; this only fills the gap. Returns true
+ * when the answer changed, so callers know whether to push it to the panel.
+ */
+function resolveSlot() {
+  const before = autoSlot;
+  const fromOrder = draftMeta?.draft_order?.[me.userId];
+  if (Number.isFinite(fromOrder)) autoSlot = fromOrder;
+  else if (me.names.length) {
+    autoSlot = readOwnSlot(document, me.names, { teams, type: draftMeta?.type || 'snake' }) ?? autoSlot;
+  }
+  if (autoSlot !== before) {
+    console.info(`${LOG} your draft slot detected: ${autoSlot}`);
+  }
+  return autoSlot !== before;
+}
+
+/**
+ * The overall pick numbers you own, trades included. A traded pick is drafted
+ * by someone who does not own the column it sits in, so "on the clock" has to
+ * be answered from this set rather than from snake maths on your slot.
+ */
+function ownPicks(slot) {
+  if (!slot || !teams) return null;
+  const rounds = draftMeta?.settings?.rounds || 15;
+  const slotToRoster = draftMeta?.slot_to_roster_id || null;
+  return ownedPickNos({
+    slot,
+    teams,
+    rounds,
+    type: draftMeta?.type || 'snake',
+    traded: draftMeta?.traded_picks || [],
+    slotToRoster,
+    rosterId: slotToRoster ? slotToRoster[slot] ?? slotToRoster[String(slot)] : null,
+  });
+}
+
+/** Push the current slot answer and pick ownership into the panel. */
+function pushOwnership() {
+  const slot = panel.settings.slot || autoSlot;
+  panel.update({ autoSlot, ownPicks: ownPicks(slot) });
+}
+
 async function attach(id) {
   if (!id || id === draftId) return;
   poller?.stop();
@@ -139,14 +265,20 @@ async function attach(id) {
   boardPicks = [];
   apiPicks = [];
   boardClockLabel = null;
+  draftMeta = null;
+  autoSlot = null;
+  panel.update({ autoSlot: null, ownPicks: null });
   manualIds = new Set(await store.getManualDrafted(draftId));
   panel.update({ manualIds: new Set(manualIds), draftedIds: new Set(), unmatched: [], pickNo: null });
   console.info(`${LOG} tracking draft ${draftId}`);
 
   poller = new DraftPoller(draftId, {
     onMeta: (draft) => {
+      draftMeta = draft || null;
       teams = draft?.settings?.teams ?? null;
       panel.update({ teams, type: draft?.type || 'snake' });
+      resolveSlot();
+      pushOwnership();
     },
     onPicks: (picks) => { apiPicks = picks || []; mergePicks(); },
     onStatus: ({ state, error }) => {
@@ -160,6 +292,10 @@ async function attach(id) {
     boardPicks = picks || [];
     boardClockLabel = clockLabel;
     if (adapter) panel.update({ boardKind: adapter.id });
+    // The board renders after the meta arrives, so the DOM route only becomes
+    // available here — and the columns move as the grid scrolls or resizes.
+    if (autoSlot === null) resolveSlot();
+    pushOwnership();
     mergePicks();
   });
 }

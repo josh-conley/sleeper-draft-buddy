@@ -1,6 +1,10 @@
 // Headless render of the Panel via jsdom, driven by a bare name list.
 // Requires jsdom:  npm i -D jsdom     Run:  node test/render.test.mjs
 import { JSDOM } from 'jsdom';
+
+// The settings view links to the ranking page when the extension APIs are
+// there; without this stub it simply omits the link.
+globalThis.chrome = { runtime: { getURL: (p) => `chrome-extension://test/${p}` } };
 import { readFileSync } from 'node:fs';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true });
@@ -37,9 +41,11 @@ const settings = {
   pollMs: 2000, slot: 7, panel: { x: 100, y: 80, w: 720, h: 560, collapsed: false },
 };
 const saved = [];
+const reorders = [];
 const panel = new Panel(css, settings, {
   onSettingsChange: (p) => saved.push(p),
   onSaveRankings: () => {}, onClearRankings: () => {}, onToggleManual: () => {},
+  onReorder: (from, to) => reorders.push([from, to]),
 });
 
 const $ = (sel) => panel.shadow.querySelector(sel);
@@ -56,8 +62,46 @@ const mkPick = (r) => ({ metadata: {
 
 panel.update({ rankings, teams: 12, type: 'snake', status: 'live' });
 ok($$('tbody tr').length === 75, `all 75 rows render (${$$('tbody tr').length})`);
-ok($$('thead th').length === 6, `six sortable column headers (${$$('thead th').length})`);
+// Rank, Pos Rank, Player, Team, Bye — the same five the ranking page shows, in
+// the same order. No separate Pos column: "RB1" already says the position.
+const headers = $$('thead th').map((th) => th.textContent.replace(/[▲▼\s]+$/, ''));
+ok(headers.length === 5, `five sortable column headers (${headers.length}: ${headers.join(', ')})`);
+ok(!headers.includes('Pos'), 'no redundant Pos column');
+ok(
+  $$('tbody tr td .pos').every((s) => s.getAttribute('data-pos')),
+  'positional rank is colour-coded by position'
+);
 ok($('thead th').getAttribute('aria-sort') === 'ascending', 'default sort is My Rank asc');
+
+// Drag to reorder, in the draft panel itself. Only while sorted by your own
+// rank: under any other sort the rows on screen are not the list being written.
+{
+  const rows = $$('tbody tr');
+  ok(rows[0].draggable, 'rows are draggable while sorted by My Rank');
+
+  const dt = { effectAllowed: null, setData() {}, getData: () => '' };
+  const fire = (node, type) => {
+    const e = new dom.window.Event(type, { bubbles: true, cancelable: true });
+    e.dataTransfer = dt;
+    node.dispatchEvent(e);
+  };
+  fire(rows[4], 'dragstart');
+  fire(rows[0], 'dragover');
+  ok($$('tbody tr.over').length === 1, 'the drop target is marked while dragging over it');
+  fire(rows[0], 'drop');
+
+  ok(reorders.length === 1, 'a drop reports one reorder');
+  ok(
+    reorders[0][0] === rows[4].dataset.id && reorders[0][1] === rows[0].dataset.id,
+    'reporting the dragged player and where he was dropped'
+  );
+
+  // The click that follows a drag must not also strike the player off.
+  let struck = 0;
+  panel.cb.onToggleManual = () => { struck += 1; };
+  rows[0].dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  ok(struck === 0, 'the click ending a drag does not strike a player off');
+}
 
 // simulate 20 picks
 const drafted = new Set(rankings.slice(0, 20).map((r) => r.id));
@@ -173,6 +217,10 @@ panel.state.status = 'live';
 // settings view
 panel.setView('settings');
 ok(!!$('textarea'), 'settings view renders the paste box');
+ok(
+  $$('.settings a').some((a) => (a.getAttribute('href') || '').includes('rankings.html')),
+  'settings view links to the ranking page'
+);
 ok($$('.settings select').length >= 1, 'slot selector present');
 panel.setView('ranks');
 ok(!!$('table'), 'returns to the table');
@@ -182,6 +230,21 @@ panel.toggleCollapse();
 ok($('.wrap').classList.contains('collapsed'), 'collapse works');
 ok(saved.some((p) => p.panel && p.panel.collapsed === true), 'collapse persisted to settings');
 panel.toggleCollapse();
+
+
+
+// The on-the-clock dot is green, and has its own token. It used to borrow
+// --steal, which was silently wrong the moment "must draft" became blue: being
+// on the clock is not a value judgement and must not share a colour with one.
+{
+  const styles = panel.shadow.querySelector('style').textContent;
+  ok(/--up:\s*#17c964/.test(styles), 'there is a dedicated --up token, and it is green');
+  ok(
+    /\.dot\[data-state="on-clock"\][\s\S]{0,120}var\(--up\)/.test(styles),
+    'the on-clock dot is painted from it'
+  );
+  ok(!/\.dot[^}]*var\(--steal\)/.test(styles), 'and the dot no longer borrows --steal');
+}
 
 console.log(fails ? `\n${fails} failing check(s)` : '\nAll render checks passed');
 process.exit(fails ? 1 : 0);

@@ -109,10 +109,26 @@ export class DraftPoller {
       const res = await fetch(`${API}/draft/${this.draftId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const draft = await res.json();
+      // Trades are settled before the draft and reported separately, so one
+      // read alongside the meta is enough. A failure here must not cost us the
+      // draft settings, hence its own catch.
+      draft.traded_picks = await this.fetchTradedPicks();
       this.handlers.onMeta?.(draft);
     } catch (err) {
       // Non-fatal: picks still work without draft settings.
       console.warn('[SleeperRanks] draft meta unavailable:', err.message);
+    }
+  }
+
+  async fetchTradedPicks() {
+    try {
+      const res = await fetch(`${API}/draft/${this.draftId}/traded_picks`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const traded = await res.json();
+      return Array.isArray(traded) ? traded : [];
+    } catch (err) {
+      console.warn('[SleeperRanks] traded picks unavailable:', err.message);
+      return [];
     }
   }
 

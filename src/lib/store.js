@@ -1,4 +1,6 @@
-// Thin promise wrappers over chrome.storage.local.
+// Thin promise wrappers over the browser's extension storage.
+
+import { api } from './ext.js';
 
 export const KEYS = {
   rankings: 'rankings',
@@ -19,12 +21,12 @@ export const DEFAULT_SETTINGS = {
 };
 
 export async function get(key, fallback = null) {
-  const out = await chrome.storage.local.get(key);
+  const out = await api.storage.local.get(key);
   return key in out && out[key] !== undefined ? out[key] : fallback;
 }
 
 export async function set(key, value) {
-  await chrome.storage.local.set({ [key]: value });
+  await api.storage.local.set({ [key]: value });
 }
 
 export async function getSettings() {

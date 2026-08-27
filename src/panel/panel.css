@@ -11,9 +11,17 @@
   --dim: #8b93a7;
   --accent: #4fd1c5;
 
-  --steal: #17c964;
-  --value: #6fbf73;
-  --fair: #6b7280;
+  /* The ramp reads blue -> green -> soft green -> amber -> red. Grey is gone
+     on purpose: sorted by ADP mid-draft, a neutral band in the middle of the
+     board said nothing, and the players sitting there are the ordinary good
+     picks rather than the ones to ignore. */
+  --steal: #5aa9f5;   /* must draft */
+  /* The clock dot's own colour. It used to borrow --steal, which was fine while
+     that was green and wrong the moment "must draft" became blue: being on the
+     clock is not a value judgement and should never share a token with one. */
+  --up: #17c964;
+  --value: #17c964;
+  --fair: #6fbf73;
   --reach: #e0a53a;
   --big-reach: #ef4444;
 
@@ -61,7 +69,7 @@
    green = you're up, yellow = 1-4 picks away, red = 5+, grey = can't tell. */
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fair); flex: 0 0 auto; }
 .dot[data-state="on-clock"] {
-  background: var(--steal);
+  background: var(--up);
   box-shadow: 0 0 0 0 rgba(23, 201, 100, .7);
   animation: srx-pulse 1.6s ease-out infinite;
 }
@@ -75,7 +83,7 @@
   100% { box-shadow: 0 0 0 0 rgba(23, 201, 100, 0); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dot[data-state="on-clock"] { animation: none; box-shadow: 0 0 8px var(--steal); }
+  .dot[data-state="on-clock"] { animation: none; box-shadow: 0 0 8px var(--up); }
 }
 .pickinfo { color: var(--dim); }
 .pickinfo b { color: var(--text); }
@@ -157,9 +165,9 @@ tbody tr.manual td { opacity: .38; text-decoration: line-through dotted; }
   font-weight: 700; font-variant-numeric: tabular-nums;
   background: var(--bg-3); color: var(--text);
 }
-.rankbadge[data-band="steal"]     { background: rgba(23, 201, 100, .22); color: var(--steal); box-shadow: inset 0 0 0 1px rgba(23,201,100,.5); }
-.rankbadge[data-band="value"]     { background: rgba(111, 191, 115, .16); color: var(--value); }
-.rankbadge[data-band="fair"]      { background: var(--bg-3); color: var(--dim); }
+.rankbadge[data-band="steal"]     { background: rgba(90, 169, 245, .22); color: var(--steal); box-shadow: inset 0 0 0 1px rgba(90,169,245,.55); }
+.rankbadge[data-band="value"]     { background: rgba(23, 201, 100, .18); color: var(--value); }
+.rankbadge[data-band="fair"]      { background: rgba(111, 191, 115, .14); color: var(--fair); }
 .rankbadge[data-band="reach"]     { background: rgba(224, 165, 58, .16); color: var(--reach); }
 .rankbadge[data-band="big-reach"] { background: rgba(239, 68, 68, .18); color: var(--big-reach); }
 
@@ -250,3 +258,18 @@ td.unresolved { color: var(--reach); border-bottom: 1px dotted rgba(224, 165, 58
   color: var(--reach);
   box-shadow: 0 0 0 2px rgba(224, 165, 58, .15);
 }
+/* Slot worked out from the draft rather than chosen: stated, not shouted. */
+.slotwrap.auto .slotsel { color: var(--dim); font-style: italic; }
+
+/* Drag to reorder, available only while sorted by your own rank. */
+tr.draggable { cursor: grab; }
+tr.dragging { opacity: 0.35; }
+tr.over td { box-shadow: inset 0 2px 0 0 var(--amber, #e0a53a); }
+
+/* The overall pick numbers sit beside the round.pick label, quieter than it —
+   they are the reference the ADP column is read against, not the headline. */
+.pickinfo .overall { color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* The overall pick numbers sit beside the round.pick label, quieter than it —
+   they are the reference the ADP column is read against, not the headline. */
+.pickinfo .overall { color: var(--dim); font-variant-numeric: tabular-nums; }

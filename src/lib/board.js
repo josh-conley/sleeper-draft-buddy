@@ -11,6 +11,8 @@
 // reports no picks at all for mock drafts (/picks stays [] and status stays
 // "pre_draft") because live state travels over a WebSocket.
 
+import { slotForPick } from './draft.js';
+
 const PICK_RE = /^(\d{1,2})\.(\d{1,2})$/;
 
 /** Text leaves of an element, skipping SVG-internal text. */
@@ -19,6 +21,26 @@ function leaves(el) {
     .filter((e) => e.children.length === 0 && !e.closest('svg'))
     .map((e) => e.textContent.trim())
     .filter(Boolean);
+}
+
+/**
+ * The pick label ("1.03") inside a cell, if it has one.
+ *
+ * Load-bearing rather than cosmetic: the beta board's utility classes are not
+ * unique to the grid — bg-dls-alert-warning also colours the position chips in
+ * the roster panel — so "is this a board cell?" has to be answered by what the
+ * element contains, not by what it is called.
+ */
+function pickLabelIn(el) {
+  return leaves(el).find((t) => PICK_RE.test(t)) || null;
+}
+
+/** The first element matching `sel` that actually holds a pick label. */
+function labelledCell(root, sel) {
+  for (const el of root.querySelectorAll(sel)) {
+    if (pickLabelIn(el)) return el;
+  }
+  return null;
 }
 
 function toPick(name, position, team, label) {
@@ -47,7 +69,8 @@ export const betaAdapter = {
     positionFromClass: /bg-dls-picked-([a-z]+)/,
   },
 
-  detect: (root) => !!root.querySelector(betaAdapter.SELECTORS.pickedCell + ', ' + betaAdapter.SELECTORS.clockCell),
+  detect: (root) =>
+    !!labelledCell(root, betaAdapter.SELECTORS.pickedCell + ', ' + betaAdapter.SELECTORS.clockCell),
 
   // A cell reads: ["Jahmyr", "Gibbs", "•", "DET", "(6)", "1.1"]
   // Badge icons carry an SVG <title> ("Rookie") that must not join the name.
@@ -75,9 +98,8 @@ export const betaAdapter = {
   },
 
   readClockLabel(root) {
-    const cell = root.querySelector(this.SELECTORS.clockCell);
-    if (!cell) return null;
-    return leaves(cell).find((t) => PICK_RE.test(t)) || null;
+    const cell = labelledCell(root, this.SELECTORS.clockCell);
+    return cell ? pickLabelIn(cell) : null;
   },
 };
 
@@ -93,7 +115,8 @@ export const legacyAdapter = {
     position: '.position',
   },
 
-  detect: (root) => !!root.querySelector(legacyAdapter.SELECTORS.pickedCell + ', ' + legacyAdapter.SELECTORS.clockCell),
+  detect: (root) =>
+    !!labelledCell(root, legacyAdapter.SELECTORS.pickedCell + ', ' + legacyAdapter.SELECTORS.clockCell),
 
   // Cell contains .pick "1.1", .player-name "J. Gibbs", .position "RB - DET".
   // NOTE the abbreviated first name — full-name matching cannot work here, so
@@ -114,13 +137,106 @@ export const legacyAdapter = {
   },
 
   readClockLabel(root) {
-    const cell = root.querySelector(this.SELECTORS.clockCell);
+    const cell = labelledCell(root, this.SELECTORS.clockCell);
     if (!cell) return null;
     const p = cell.querySelector(this.SELECTORS.pick)?.textContent.trim();
-    if (p && PICK_RE.test(p)) return p;
-    return leaves(cell).find((t) => PICK_RE.test(t)) || null;
+    return p && PICK_RE.test(p) ? p : pickLabelIn(cell);
   },
 };
+
+// --------------------------------------------------------- column geometry
+//
+// Fallback for working out YOUR draft slot when the API cannot say — a public
+// mock has no draft_order to look you up in.
+//
+// Both boards label every cell, drafted or empty ("1.02", "2.11"), and both lay
+// the columns out left to right in slot order. So the labels themselves
+// calibrate the grid: read each label, work out which slot it belongs to, and
+// the cell's horizontal centre becomes that column's x. Your name in the header
+// then lands in one of those columns.
+//
+// This finds your SLOT — where you drafted from. It deliberately does not try
+// to answer "is it my turn", because a traded pick is drafted by someone who
+// does not own the column it sits in. Ownership lives in turn.js.
+
+
+const MIN_COL_W = 56;
+const MAX_COL_W = 400;
+
+/** Walk up from a label to the cell that holds it. */
+function cellOf(el, rectOf) {
+  let n = el;
+  for (let i = 0; i < 6 && n; i++) {
+    if (rectOf(n).width >= MIN_COL_W) return n;
+    n = n.parentElement;
+  }
+  return el;
+}
+
+/**
+ * Map the board's columns: slot -> horizontal centre.
+ * @returns {Array<{slot:number, cx:number}>} sorted left to right
+ */
+export function readColumns(root = document, { teams, type = 'snake', rectOf = (e) => e.getBoundingClientRect() } = {}) {
+  if (!teams) return [];
+  const xs = new Map();
+  for (const el of root.querySelectorAll('div,span')) {
+    if (el.children.length) continue;
+    const label = el.textContent.trim();
+    if (!PICK_RE.test(label)) continue;
+    const r = rectOf(cellOf(el, rectOf));
+    if (r.width < MIN_COL_W || r.width > MAX_COL_W) continue;
+    const slot = slotForPick(labelToPickNo(label, teams), teams, type);
+    if (!slot) continue;
+    if (!xs.has(slot)) xs.set(slot, []);
+    xs.get(slot).push(r.x + r.width / 2);
+  }
+  return [...xs.entries()]
+    .map(([slot, list]) => ({ slot, cx: list.reduce((a, b) => a + b, 0) / list.length }))
+    .sort((a, b) => a.cx - b.cx);
+}
+
+/** The column whose centre is nearest x, if it is near enough to be a real hit. */
+function columnAt(columns, x) {
+  if (columns.length < 2) return null;
+  const pitch = Math.abs(columns[1].cx - columns[0].cx) || MIN_COL_W;
+  let best = null;
+  for (const c of columns) {
+    const d = Math.abs(c.cx - x);
+    if (!best || d < best.d) best = { slot: c.slot, d };
+  }
+  return best && best.d <= pitch / 2 ? best.slot : null;
+}
+
+/**
+ * Your slot, by finding your account name in the board header.
+ *
+ * The header is above the grid, so candidates are ranked by how high they sit —
+ * your name also appears in side panels ("drafted players: JoshC94"), and those
+ * are both lower down and usually outside the grid's columns.
+ *
+ * @param {string[]} names  display name and username
+ */
+export function readOwnSlot(root = document, names = [], opts = {}) {
+  const wanted = names.map((n) => String(n).trim().toLowerCase()).filter(Boolean);
+  if (!wanted.length) return null;
+  const rectOf = opts.rectOf || ((e) => e.getBoundingClientRect());
+  const columns = opts.columns || readColumns(root, { ...opts, rectOf });
+  if (columns.length < 2) return null;
+
+  const hits = [];
+  for (const el of root.querySelectorAll('*')) {
+    if (el.children.length) continue;
+    const t = el.textContent.trim();
+    if (t.length > 40 || !wanted.includes(t.toLowerCase())) continue;
+    const r = rectOf(el);
+    const slot = columnAt(columns, r.x + r.width / 2);
+    if (slot) hits.push({ slot, y: r.y });
+  }
+  if (!hits.length) return null;
+  hits.sort((a, b) => a.y - b.y);
+  return hits[0].slot;
+}
 
 export const ADAPTERS = [betaAdapter, legacyAdapter];
 

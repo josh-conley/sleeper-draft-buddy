@@ -2,6 +2,7 @@
 // case is one paste and done. A wider CSV still gets a mapping confirmation,
 // because a mis-mapped column would poison every rank and value colour.
 
+import { api } from '../lib/ext.js';
 import { FIELDS, parsePaste, buildRows } from '../lib/parse.js';
 
 const el = (tag, props = {}, kids = []) => {
@@ -25,7 +26,20 @@ export function renderSettings(container, ctx, cb) {
   const box = el('div', { class: 'settings' });
   container.appendChild(box);
 
-  box.appendChild(el('h3', { text: 'Paste your player list' }));
+  box.appendChild(el('h3', { text: 'Your player list' }));
+
+  // Every other module in the panel renders without touching chrome, which is
+  // why they can be tested as plain DOM. Read it defensively rather than make
+  // this the one that cannot.
+  const rankingsUrl = api?.runtime?.getURL?.('src/rankings/rankings.html');
+  if (rankingsUrl) {
+    box.appendChild(
+      el('p', {}, [
+        el('a', { href: rankingsUrl, target: '_blank', rel: 'noreferrer', text: 'Open My Rankings →' }),
+        el('span', { class: 'dim', text: ' — build and reorder your list there, seeded from live Sleeper ADP.' }),
+      ])
+    );
+  }
   box.appendChild(
     el('p', {
       text:

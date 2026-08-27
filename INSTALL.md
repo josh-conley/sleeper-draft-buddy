@@ -1,7 +1,11 @@
 # Sleeper Draft Buddy — Install
 
-A Chrome extension that puts your own player rankings on top of the Sleeper
-draft board and crosses players off automatically as they get drafted.
+A Chrome extension that lets you rank players, then puts that ranking on top of
+the Sleeper draft board and crosses players off automatically as they get
+drafted.
+
+> Installing from the Chrome Web Store? None of this applies — click Add to
+> Chrome and skip to "Using it". These steps are for a zip sent to you directly.
 
 Takes about two minutes. You only do this once.
 
@@ -10,7 +14,7 @@ Takes about two minutes. You only do this once.
 ## 1. Unzip
 
 Unzip the file you were sent. You'll get a folder called something like
-`sleeper-draft-buddy-v1.0.0`.
+`sleeper-draft-buddy-v1.1.0`.
 
 **Put it somewhere permanent** — Documents is fine. Chrome loads it from wherever
 you leave it, so if you delete or move the folder later, the extension stops
@@ -22,7 +26,7 @@ working. Don't leave it in Downloads.
    (type it in the address bar — it won't come up in a search)
 2. Turn on **Developer mode**, top-right corner
 3. Click **Load unpacked**, top-left
-4. Select the `sleeper-draft-buddy-v1.0.0` folder — the one with
+4. Select the `sleeper-draft-buddy-v1.1.0` folder — the one with
    `manifest.json` inside it — and click Select
 
 You should see "Sleeper Draft Buddy" appear in the list.

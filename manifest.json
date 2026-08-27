@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Sleeper Draft Buddy",
-  "version": "1.0.0",
-  "description": "Paste a list of player names and get a live draft overlay that hides players as they are drafted, on either Sleeper board.",
+  "version": "1.2.0",
+  "description": "Rank players from live ADP, then get a draft overlay that crosses them off as they are drafted on either Sleeper board.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -41,7 +41,8 @@
         "src/main.js",
         "src/lib/*.js",
         "src/panel/*.js",
-        "src/panel/panel.css"
+        "src/panel/panel.css",
+        "src/rankings/rankings.html"
       ],
       "matches": [
         "https://sleeper.com/*"
